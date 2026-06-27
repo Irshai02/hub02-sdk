@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hub02 SDK — browser example</title>
+    <!--
+      Base44-style tool: no backend needed. The Hub02 proxy push-injects
+      window.__HUB02__ and exposes GET /__hub02/me. The SDK reads whichever
+      is available. Drop in the IIFE bundle (window.hub02) — no build step.
+    -->
+    <script src="../../node/dist/sdk.global.js"></script>
+  </head>
+  <body>
+    <h1>Workout Planner</h1>
+    <p id="greeting">Loading…</p>
+    <ul id="plan"></ul>
+
+    <script>
+      (async () => {
+        const user = await window.hub02.user(); // { id, hub_id, tool_id, email?, name? } | null
+        const greeting = document.getElementById("greeting");
+        if (!user) {
+          greeting.textContent = "Not signed in.";
+          return;
+        }
+        greeting.textContent = `Hi ${user.name || user.email || user.id}!`;
+
+        // Durable key rule: store/read data keyed on user.id (stable UUID),
+        // NOT email (display-only, can change).
+        const key = `plan:${user.id}`;
+        const plan = JSON.parse(localStorage.getItem(key) || "[]");
+        const ul = document.getElementById("plan");
+        for (const item of plan.length ? plan : ["Add your first workout"]) {
+          const li = document.createElement("li");
+          li.textContent = item;
+          ul.appendChild(li);
+        }
+
+        // Redirect to Hub02 login when the session expires (no black screen).
+        window.hub02.onExpire();
+      })();
+    </script>
+  </body>
+</html>

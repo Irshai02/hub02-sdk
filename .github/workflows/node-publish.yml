@@ -1,0 +1,47 @@
+# Tag-gated npm publish for @hub02/sdk.
+#
+# NOT TRIGGERED until both:
+#   1. a tag matching `node-v*` is pushed, AND
+#   2. the workflow_dispatch `confirm` input is set to `publish`.
+# We also leave the actual `npm publish` commented so a stray tag cannot ship a
+# release. To publish later: set the NPM_TOKEN secret, uncomment the publish
+# step, push a `node-vX.Y.Z` tag.
+name: node-publish
+
+on:
+  push:
+    tags: ["node-v*"]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm a real release'
+        required: true
+        default: "dry-run"
+
+defaults:
+  run:
+    working-directory: node
+
+jobs:
+  publish:
+    # Guard: only proceed on an explicit dispatch confirmation.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'publish' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: node/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      # - run: npm publish --access public
+      #   env:
+      #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: echo "Build verified. Publish step intentionally disabled."

@@ -1,0 +1,4 @@
+# Install the SDK from the sibling python/ package during development:
+-e ../../python
+fastapi>=0.100
+uvicorn>=0.30

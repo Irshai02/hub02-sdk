@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hub02-sdk"
+version = "0.1.0"
+description = "Hub02 tool-identity SDK — verify Hub02 identity tokens (Ed25519) on your Python backend."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Hub02" }]
+keywords = ["hub02", "sso", "identity", "jwt", "ed25519", "auth"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+]
+dependencies = [
+  "PyJWT[crypto]>=2.8.0",
+  "cryptography>=42.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Irshai02/hub02-sdk"
+Repository = "https://github.com/Irshai02/hub02-sdk"
+
+[project.optional-dependencies]
+fastapi = ["fastapi>=0.100"]
+flask = ["flask>=2.0"]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "build>=1.2",
+  "fastapi>=0.100",
+  "flask>=2.0",
+  "starlette>=0.37",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hub02_sdk"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/hub02_sdk", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]

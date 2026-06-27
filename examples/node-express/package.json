@@ -1,0 +1,14 @@
+{
+  "name": "hub02-example-node-express",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Own-backend tool example: Express API protected by @hub02/sdk/server.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@hub02/sdk": "file:../../node",
+    "express": "^4.21.2"
+  }
+}
