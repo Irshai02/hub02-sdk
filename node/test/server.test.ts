@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   verifyHub02Token,
-  requireHub02User,
+  authenticateHub02,
   extractToken,
-  hub02Express,
+  hub02Auth,
   Hub02AuthError,
 } from "../src/server";
 import { makeKeys, mintToken, mockJwks, type TestKeys } from "./helpers";
@@ -115,14 +115,14 @@ describe("extractToken", () => {
   });
 });
 
-describe("requireHub02User", () => {
+describe("authenticateHub02", () => {
   it("returns a trusted user from a valid request", async () => {
     const token = await mintToken(keys, {
       sub: "u-42",
       email: "e@x.com",
       name: "Grace",
     });
-    const user = await requireHub02User(
+    const user = await authenticateHub02(
       { headers: { "x-hub02-auth": token } },
       { jwks },
     );
@@ -133,7 +133,7 @@ describe("requireHub02User", () => {
 
   it("throws 401 when no token", async () => {
     try {
-      await requireHub02User({ headers: {} }, { jwks });
+      await authenticateHub02({ headers: {} }, { jwks });
       throw new Error("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(Hub02AuthError);
@@ -142,7 +142,7 @@ describe("requireHub02User", () => {
   });
 });
 
-describe("hub02Express middleware", () => {
+describe("hub02Auth middleware", () => {
   function mockRes() {
     const res = {
       statusCode: 0,
@@ -167,7 +167,7 @@ describe("hub02Express middleware", () => {
     >;
     const res = mockRes();
     let nexted = false;
-    await hub02Express({ jwks })(
+    await hub02Auth({ jwks })(
       req as never,
       res as never,
       () => {
@@ -181,7 +181,7 @@ describe("hub02Express middleware", () => {
   it("responds 401 on a bad token", async () => {
     const req = { headers: { "x-hub02-auth": "garbage" } };
     const res = mockRes();
-    await hub02Express({ jwks })(req as never, res as never, () => {
+    await hub02Auth({ jwks })(req as never, res as never, () => {
       throw new Error("next should not be called");
     });
     expect(res.statusCode).toBe(401);

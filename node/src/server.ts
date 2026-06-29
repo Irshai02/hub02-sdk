@@ -9,9 +9,9 @@
  * client-supplied field.
  *
  * Usage:
- *   import { requireHub02User } from "@hub02/sdk/server";
+ *   import { authenticateHub02 } from "@hub02/sdk/server";
  *   app.get("/my-plan", async (req, res) => {
- *     const user = await requireHub02User(req);
+ *     const user = await authenticateHub02(req);
  *     res.json(getPlan(user.id));
  *   });
  */
@@ -148,7 +148,7 @@ export function extractToken(req: RequestLike): string | undefined {
  *
  * @throws {Hub02AuthError} (status 401) when no valid token is present.
  */
-export async function requireHub02User(
+export async function authenticateHub02(
   req: RequestLike,
   opts?: VerifyOptions,
 ): Promise<Hub02User> {
@@ -175,13 +175,13 @@ type ExpressNext = (err?: unknown) => void;
  * user to `req.hub02User`. Responds `401 { authenticated:false }` on failure.
  *
  * Usage:
- *   app.use(hub02Express());
+ *   app.use(hub02Auth());
  *   app.get("/me", (req, res) => res.json(req.hub02User));
  */
-export function hub02Express(opts?: VerifyOptions) {
+export function hub02Auth(opts?: VerifyOptions) {
   return async (req: ExpressReq, res: ExpressRes, next: ExpressNext) => {
     try {
-      req.hub02User = await requireHub02User(req, opts);
+      req.hub02User = await authenticateHub02(req, opts);
       next();
     } catch (err) {
       if (err instanceof Hub02AuthError) {

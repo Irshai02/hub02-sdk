@@ -46,9 +46,9 @@ key on `email`/`name`; never trust a client-supplied `user_id` on the server.
    - Add `hub02.onExpire();` so expiry redirects to login.
 
 4. **Server wiring** (own-backend only) — guard protected routes. REAL API:
-   - Express: `requireHub02User(req)` or `app.use(hub02Express())` → `req.hub02User`.
+   - Express: `authenticateHub02(req)` or `app.use(hub02Auth())` → `req.hub02User`.
    - FastAPI: `require_user = fastapi_dependency(); Depends(require_user)`.
-   - Flask: `flask_require_hub02_user()` inside the view.
+   - Flask: `flask_authenticate_hub02()` inside the view.
    - Generic: `verifyHub02Token(jwt, opts)` / `verify_hub02_token(token, ...)`.
    - Pass the tool id (`{ toolId }` / `tool_id=`) for replay safety.
 
@@ -62,11 +62,14 @@ key on `email`/`name`; never trust a client-supplied `user_id` on the server.
 ## Real public API (cross-check against code before claiming done)
 
 - Node client (`@hub02/sdk`): `hub02.user`, `hub02.isAuthenticated`,
-  `hub02.onExpire`; type `Hub02User { id, hub_id?, tool_id?, email?, name? }`.
-- Node server (`@hub02/sdk/server`): `verifyHub02Token`, `requireHub02User`,
-  `extractToken`, `hub02Express`, `Hub02AuthError`, `Hub02Claims`.
+  `hub02.onExpire`, `hub02.fetchAuthSession`, `hub02.token`; types
+  `Hub02User { id, hub_id?, tool_id?, email?, name? }`,
+  `Hub02Session { token, claims, userSub?, hubId?, toolId?, expiresAt?, isValid }`.
+  Separate-origin backend → attach `Bearer ${await hub02.token()}` via an interceptor.
+- Node server (`@hub02/sdk/server`): `verifyHub02Token`, `authenticateHub02`,
+  `extractToken`, `hub02Auth`, `Hub02AuthError`, `Hub02Claims`.
 - Node React (`@hub02/sdk/react`): `useHub02User`.
 - Python (`hub02_sdk` / `hub02_sdk.server`): `verify_hub02_token`,
-  `require_hub02_user`, `extract_token`, `fastapi_dependency`,
-  `flask_require_hub02_user`, `Hub02User`, `Hub02Claims`, `Hub02AuthError`;
+  `authenticate_hub02`, `extract_token`, `fastapi_dependency`,
+  `flask_authenticate_hub02`, `Hub02User`, `Hub02Claims`, `Hub02AuthError`;
   client helpers `user_from_window_identity`, `user_from_me_response`.

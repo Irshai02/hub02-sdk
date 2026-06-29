@@ -8,8 +8,8 @@ client-supplied field.
 
 Usage::
 
-    from hub02_sdk.server import require_hub02_user
-    user = require_hub02_user(request)   # raises Hub02AuthError on invalid
+    from hub02_sdk.server import authenticate_hub02
+    user = authenticate_hub02(request)   # raises Hub02AuthError on invalid
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ from ._shared import (
 
 __all__ = [
     "verify_hub02_token",
-    "require_hub02_user",
+    "authenticate_hub02",
     "extract_token",
     "fastapi_dependency",
-    "flask_require_hub02_user",
+    "flask_authenticate_hub02",
     "Hub02User",
     "Hub02Claims",
     "Hub02AuthError",
@@ -196,7 +196,7 @@ def extract_token(request: Any) -> Optional[str]:
     return None
 
 
-def require_hub02_user(
+def authenticate_hub02(
     request: Any,
     *,
     tool_id: Optional[str] = None,
@@ -244,7 +244,7 @@ def fastapi_dependency(*, tool_id: Optional[str] = None, **kwargs: Any):
 
     def _dep(request: Any) -> Hub02User:
         try:
-            return require_hub02_user(request, tool_id=tool_id, **kwargs)
+            return authenticate_hub02(request, tool_id=tool_id, **kwargs)
         except Hub02AuthError as exc:
             try:
                 from fastapi import HTTPException
@@ -263,7 +263,7 @@ def fastapi_dependency(*, tool_id: Optional[str] = None, **kwargs: Any):
 # --------------------------------------------------------------------------
 
 
-def flask_require_hub02_user(*, tool_id: Optional[str] = None, **kwargs: Any) -> Hub02User:
+def flask_authenticate_hub02(*, tool_id: Optional[str] = None, **kwargs: Any) -> Hub02User:
     """Flask helper: read the current request and return a trusted user.
 
     Call inside a view (uses ``flask.request``). Raises
@@ -272,4 +272,4 @@ def flask_require_hub02_user(*, tool_id: Optional[str] = None, **kwargs: Any) ->
     """
     from flask import request as flask_request
 
-    return require_hub02_user(flask_request, tool_id=tool_id, **kwargs)
+    return authenticate_hub02(flask_request, tool_id=tool_id, **kwargs)

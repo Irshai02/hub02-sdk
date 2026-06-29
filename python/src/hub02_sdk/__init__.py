@@ -3,7 +3,7 @@
 Public surface::
 
     from hub02_sdk import Hub02User
-    from hub02_sdk.server import verify_hub02_token, require_hub02_user
+    from hub02_sdk.server import verify_hub02_token, authenticate_hub02
 
 Token algorithm is EdDSA / Ed25519, ``iss="hub02"``, ``aud="tool-identity"``.
 """

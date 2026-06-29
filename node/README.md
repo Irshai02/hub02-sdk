@@ -29,6 +29,22 @@ hub02.onExpire();
 hub02.onExpire(({ login_url }) => showBanner(login_url));
 ```
 
+### Authenticated API calls (separate-origin backend)
+
+Get a short-lived signed JWT to attach to requests that go to a backend **not** behind the
+Hub02 proxy. `fetchAuthSession()` caches it in memory and refreshes it before expiry (never
+persisted — the long-lived credential stays in the HttpOnly cookie):
+
+```js
+const session = await hub02.fetchAuthSession();   // { token, claims, userSub, ..., isValid }
+api.interceptors.request.use(async (cfg) => {
+  cfg.headers.Authorization = `Bearer ${await hub02.token()}`;
+  return cfg;
+});
+```
+
+> Same-origin backends behind the proxy need none of this — the proxy injects `X-Hub02-Auth`.
+
 No-build / CDN drop-in (IIFE bundle exposes `window.hub02`):
 
 ```html
@@ -53,11 +69,11 @@ The proxy injects the identity JWT as `X-Hub02-Auth` (also accepts
 `Authorization: Bearer`). Always trust `user.id` from the verified token.
 
 ```js
-import { requireHub02User } from "@hub02/sdk/server";
+import { authenticateHub02 } from "@hub02/sdk/server";
 
 app.get("/my-plan", async (req, res) => {
   try {
-    const user = await requireHub02User(req);   // verifies Ed25519 vs JWKS
+    const user = await authenticateHub02(req);   // verifies Ed25519 vs JWKS
     res.json(getPlan(user.id));                 // key data on user.id (durable UUID)
   } catch (e) {
     res.status(401).json({ authenticated: false });
@@ -68,8 +84,8 @@ app.get("/my-plan", async (req, res) => {
 Express middleware:
 
 ```js
-import { hub02Express } from "@hub02/sdk/server";
-app.use(hub02Express());                        // 401 on failure
+import { hub02Auth } from "@hub02/sdk/server";
+app.use(hub02Auth());                        // 401 on failure
 app.get("/me", (req, res) => res.json(req.hub02User));
 ```
 
@@ -82,6 +98,8 @@ app.get("/me", (req, res) => res.json(req.hub02User));
 | `hub02.user` / `user` | `() => Promise<Hub02User | null>` | `window.__HUB02__` → fallback `fetch('/__hub02/me')`. |
 | `hub02.isAuthenticated` / `isAuthenticated` | `() => Promise<boolean>` | True if a user is available. |
 | `hub02.onExpire` / `onExpire` | `(cb?) => () => void` | On 401, redirect to `login_url` (default) or run `cb`. Returns unsubscribe. |
+| `hub02.fetchAuthSession` / `fetchAuthSession` | `({forceRefresh?}) => Promise<Hub02Session>` | Mint/reuse the short-lived JWT via `/__hub02/token`; cached in memory, auto-refreshed. |
+| `hub02.token` / `token` | `() => Promise<string>` | Sugar for `(await fetchAuthSession()).token`. `""` when unauthenticated. |
 | `Hub02User` | `{ id, hub_id?, tool_id?, email?, name? }` | Identity. Key data on `id`. |
 
 ### `@hub02/sdk/server` (Node / edge)
@@ -89,9 +107,9 @@ app.get("/me", (req, res) => res.json(req.hub02User));
 | Name | Signature | Purpose |
 |---|---|---|
 | `verifyHub02Token` | `(jwt, opts?) => Promise<Hub02Claims>` | Verify Ed25519 vs JWKS; checks `iss`/`aud`/`exp`/optional `toolId`. Throws `Hub02AuthError`. |
-| `requireHub02User` | `(req, opts?) => Promise<Hub02User>` | Extract + verify token from a request; throws `Hub02AuthError` (status 401). |
+| `authenticateHub02` | `(req, opts?) => Promise<Hub02User>` | Extract + verify token from a request; throws `Hub02AuthError` (status 401). |
 | `extractToken` | `(req) => string | undefined` | Pull token from `X-Hub02-Auth` / `Authorization: Bearer`. |
-| `hub02Express` | `(opts?) => middleware` | Express middleware; sets `req.hub02User`, 401 on failure. |
+| `hub02Auth` | `(opts?) => middleware` | Express middleware; sets `req.hub02User`, 401 on failure. |
 | `Hub02Claims`, `Hub02AuthError` | types / error | Raw claims; auth error with `status = 401`. |
 
 `opts` (server): `{ toolId?, jwksUrl?, jwks?, clockToleranceSec? }`.

@@ -55,7 +55,9 @@ is already wired, don't duplicate it.
 
 Public client API (`@hub02/sdk`):
 `hub02.user(): Promise<Hub02User|null>` · `hub02.isAuthenticated(): Promise<boolean>`
-· `hub02.onExpire(cb?): () => void`. `Hub02User = { id, hub_id?, tool_id?, email?, name? }`.
+· `hub02.onExpire(cb?): () => void` · `hub02.fetchAuthSession({forceRefresh?}): Promise<Hub02Session>`
+· `hub02.token(): Promise<string>`. `Hub02User = { id, hub_id?, tool_id?, email?, name? }`,
+`Hub02Session = { token, claims, userSub?, hubId?, toolId?, expiresAt?, isValid }`.
 
 **Bundled (import):**
 ```js
@@ -64,6 +66,16 @@ const user = await hub02.user();          // null if not signed in
 if (user) showUser(user);                 // user.id is the durable key
 hub02.onExpire();                         // redirect to login on expiry
 ```
+
+**Authenticated API calls to a separate-origin backend (Case 2 — common).** Attach the token
+once via an interceptor; the SDK caches + auto-refreshes the ≤5-min JWT:
+```js
+api.interceptors.request.use(async (cfg) => {
+  cfg.headers.Authorization = `Bearer ${await hub02.token()}`;
+  return cfg;
+});
+```
+(Same-origin backends behind the proxy don't need this — the proxy injects `X-Hub02-Auth`.)
 
 **React** (`@hub02/sdk/react`):
 ```jsx
@@ -80,28 +92,28 @@ const { user, loading } = useHub02User();
 ## Step 4 — wire the SERVER (authorize API calls)
 
 Only for tools with their own backend. Public server API (`@hub02/sdk/server`):
-`verifyHub02Token(jwt, opts?)` · `requireHub02User(req, opts?)` ·
-`extractToken(req)` · `hub02Express(opts?)`. `opts = { toolId?, jwksUrl?, jwks?,
+`verifyHub02Token(jwt, opts?)` · `authenticateHub02(req, opts?)` ·
+`extractToken(req)` · `hub02Auth(opts?)`. `opts = { toolId?, jwksUrl?, jwks?,
 clockToleranceSec? }`. Errors throw `Hub02AuthError` (`status === 401`).
 
 **Express:**
 ```js
-import { requireHub02User } from "@hub02/sdk/server";
+import { authenticateHub02 } from "@hub02/sdk/server";
 app.get("/my-plan", async (req, res) => {
   try {
-    const user = await requireHub02User(req);   // verifies Ed25519 vs JWKS
+    const user = await authenticateHub02(req);   // verifies Ed25519 vs JWKS
     res.json(getPlan(user.id));                 // trust user.id from the token
   } catch {
     res.status(401).json({ authenticated: false });
   }
 });
-// or middleware: app.use(hub02Express()); → req.hub02User
+// or middleware: app.use(hub02Auth()); → req.hub02User
 ```
 
 **Python — public API (`hub02_sdk.server`):** `verify_hub02_token(token, *,
-tool_id=None, ...)` · `require_hub02_user(request, *, tool_id=None, ...)` ·
+tool_id=None, ...)` · `authenticate_hub02(request, *, tool_id=None, ...)` ·
 `extract_token(request)` · `fastapi_dependency(*, tool_id=None, ...)` ·
-`flask_require_hub02_user(*, tool_id=None, ...)`. Errors raise `Hub02AuthError`
+`flask_authenticate_hub02(*, tool_id=None, ...)`. Errors raise `Hub02AuthError`
 (`.status == 401`). `Hub02User` is a dataclass `{ id, hub_id, tool_id, email,
 name }`.
 
@@ -119,17 +131,17 @@ def my_plan(user: Hub02User = Depends(require_user)):
 
 **Flask:**
 ```python
-from hub02_sdk.server import flask_require_hub02_user, Hub02AuthError
+from hub02_sdk.server import flask_authenticate_hub02, Hub02AuthError
 @app.get("/my-plan")
 def my_plan():
     try:
-        user = flask_require_hub02_user()
+        user = flask_authenticate_hub02()
     except Hub02AuthError as e:
         return {"authenticated": False, "error": str(e)}, 401
     return get_plan(user.id)
 ```
 
-For replay safety, pass the tool's id: `requireHub02User(req, { toolId })` /
+For replay safety, pass the tool's id: `authenticateHub02(req, { toolId })` /
 `fastapi_dependency(tool_id="…")`.
 
 ## Step 5 — verify it works (offline, no secrets)
@@ -139,11 +151,11 @@ local Ed25519 key and a mock JWKS:
 
 - **Node:** `jose` — `generateKeyPair("EdDSA",{crv:"Ed25519"})`, build a JWT with
   `iss:"hub02"`, `aud:"tool-identity"`, `sub`, `exp`, and a `kid` header; pass a
-  resolver as `requireHub02User(req, { jwks })`. Assert a valid token → user, a
+  resolver as `authenticateHub02(req, { jwks })`. Assert a valid token → user, a
   wrong-`aud`/expired token → 401.
 - **Python:** `cryptography` `Ed25519PrivateKey.generate()` + `PyJWT`
   `jwt.encode(..., algorithm="EdDSA")`; pass a kid→key map as
-  `require_hub02_user(request, jwks_client=...)`. Same assertions.
+  `authenticate_hub02(request, jwks_client=...)`. Same assertions.
 
 (Working versions of these tests ship in the SDK repo under `node/test/` and
 `python/tests/`, and runnable apps under `examples/`.)

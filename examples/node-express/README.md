@@ -15,5 +15,5 @@ Try it (mint a token with the SDK's test helper, or run behind the proxy):
 curl -H "Authorization: Bearer <identity-jwt>" http://localhost:3000/my-plan
 ```
 
-Key files: [`server.js`](./server.js) — `requireHub02User(req)` and the
-`hub02Express()` middleware.
+Key files: [`server.js`](./server.js) — `authenticateHub02(req)` and the
+`hub02Auth()` middleware.

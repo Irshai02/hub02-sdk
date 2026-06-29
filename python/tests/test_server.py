@@ -3,7 +3,7 @@ import pytest
 from hub02_sdk.server import (
     Hub02AuthError,
     extract_token,
-    require_hub02_user,
+    authenticate_hub02,
     verify_hub02_token,
 )
 from tests._helpers import KeyPair, MockJwks, make_keys, mint_token
@@ -84,12 +84,12 @@ def test_extract_token_none():
     assert extract_token({}) is None
 
 
-# ---- require_hub02_user ---------------------------------------------------
+# ---- authenticate_hub02 ---------------------------------------------------
 
 
 def test_require_user_returns_trusted_user(keys: KeyPair, jwks: MockJwks):
     token = mint_token(keys, sub="u-42", email="e@x.com", name="Grace")
-    user = require_hub02_user({"X-Hub02-Auth": token}, jwks_client=jwks)
+    user = authenticate_hub02({"X-Hub02-Auth": token}, jwks_client=jwks)
     assert user.id == "u-42"
     assert user.email == "e@x.com"
     assert user.name == "Grace"
@@ -97,7 +97,7 @@ def test_require_user_returns_trusted_user(keys: KeyPair, jwks: MockJwks):
 
 def test_require_user_no_token_raises(jwks: MockJwks):
     with pytest.raises(Hub02AuthError) as exc:
-        require_hub02_user({}, jwks_client=jwks)
+        authenticate_hub02({}, jwks_client=jwks)
     assert exc.value.status == 401
 
 
@@ -110,5 +110,5 @@ def test_require_user_with_request_headers_object(keys: KeyPair, jwks: MockJwks)
 
     token = mint_token(keys, sub="u-hdr")
     req = FakeReq({"x-hub02-auth": token})
-    user = require_hub02_user(req, jwks_client=jwks)
+    user = authenticate_hub02(req, jwks_client=jwks)
     assert user.id == "u-hdr"

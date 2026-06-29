@@ -1,5 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { hub02, user, isAuthenticated, onExpire } from "../src/client";
+import {
+  hub02,
+  user,
+  isAuthenticated,
+  onExpire,
+  fetchAuthSession,
+  token,
+} from "../src/client";
+
+/** Build a fake (unsigned) JWT with the given payload — for decode tests only. */
+function fakeJwt(payload: Record<string, unknown>): string {
+  const b64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `eyJhbGciOiJFZERTQSJ9.${b64}.sig`;
+}
 
 declare global {
   var window: any;
@@ -113,10 +126,56 @@ describe("hub02.onExpire()", () => {
   });
 });
 
+describe("hub02.fetchAuthSession()", () => {
+  it("mints, decodes, caches, and force-refreshes", async () => {
+    const exp = Math.floor(Date.now() / 1000) + 300;
+    const jwt = fakeJwt({ sub: "u-9", hub_id: "h-9", tool_id: "t-9", exp });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ token: jwt, exp }),
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const s = await fetchAuthSession({ forceRefresh: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/__hub02/token",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(s.token).toBe(jwt);
+    expect(s.isValid).toBe(true);
+    expect(s.userSub).toBe("u-9");
+    expect(s.hubId).toBe("h-9");
+    expect(s.toolId).toBe("t-9");
+    expect(s.claims?.sub).toBe("u-9");
+
+    // Second call reuses the in-memory cache (no extra fetch).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await token()).toBe(jwt);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // forceRefresh re-mints.
+    await fetchAuthSession({ forceRefresh: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns an invalid session when /__hub02/token says no", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ authenticated: false, login_url: "https://login" }),
+    }) as any;
+    const s = await fetchAuthSession({ forceRefresh: true });
+    expect(s.isValid).toBe(false);
+    expect(s.token).toBe("");
+    expect(await token()).toBe("");
+  });
+});
+
 describe("namespaced export", () => {
-  it("exposes user/isAuthenticated/onExpire", () => {
+  it("exposes user/isAuthenticated/onExpire/fetchAuthSession/token", () => {
     expect(typeof hub02.user).toBe("function");
     expect(typeof hub02.isAuthenticated).toBe("function");
     expect(typeof hub02.onExpire).toBe("function");
+    expect(typeof hub02.fetchAuthSession).toBe("function");
+    expect(typeof hub02.token).toBe("function");
   });
 });

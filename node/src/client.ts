@@ -12,12 +12,22 @@
 
 import {
   HUB02_ME_PATH,
+  HUB02_TOKEN_PATH,
+  HUB02_TOKEN_REFRESH_SKEW_SEC,
   type Hub02User,
   type Hub02MeResponse,
   type Hub02WindowIdentity,
+  type Hub02Session,
+  type Hub02TokenResponse,
+  type Hub02Claims,
 } from "./shared";
 
-export type { Hub02User, Hub02MeResponse } from "./shared";
+export type {
+  Hub02User,
+  Hub02MeResponse,
+  Hub02Session,
+  Hub02Claims,
+} from "./shared";
 
 function fromWindow(): Hub02User | null {
   if (typeof window === "undefined") return null;
@@ -128,11 +138,105 @@ export function onExpire(cb?: ExpireCallback): () => void {
   };
 }
 
+// ---- Auth session (Amplify-style) ---------------------------------------
+
+// In-memory only — the JWT is NEVER persisted to storage. The long-lived
+// credential stays in the HttpOnly cookie; this is just an ephemeral ≤5-min
+// token cached to avoid a network round-trip on every request.
+let cachedSession: Hub02Session | null = null;
+
+const emptySession = (): Hub02Session => ({
+  token: "",
+  claims: null,
+  isValid: false,
+});
+
+function decodeJwtClaims(token: string): Hub02Claims | null {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
+    const json =
+      typeof atob === "function"
+        ? atob(b64 + pad)
+        : // Node without atob
+          Buffer.from(b64 + pad, "base64").toString("utf8");
+    return JSON.parse(json) as Hub02Claims;
+  } catch {
+    return null;
+  }
+}
+
+function sessionFromToken(token: string, exp?: number): Hub02Session {
+  const claims = decodeJwtClaims(token);
+  const expiresAt = exp ?? claims?.exp;
+  return {
+    token,
+    claims,
+    userSub: claims?.sub,
+    hubId: claims?.hub_id,
+    toolId: claims?.tool_id,
+    expiresAt,
+    isValid:
+      !!token && (expiresAt === undefined || expiresAt * 1000 > Date.now()),
+  };
+}
+
+/** A cached session is reusable only if it won't expire within the skew window. */
+function sessionStillFresh(s: Hub02Session | null): s is Hub02Session {
+  if (!s || !s.isValid || !s.expiresAt) return false;
+  return s.expiresAt * 1000 - Date.now() > HUB02_TOKEN_REFRESH_SKEW_SEC * 1000;
+}
+
+/**
+ * Fetch (or reuse) the current auth session.
+ *
+ * Returns a short-lived signed JWT plus decoded claims. The token is cached in
+ * memory and auto-refreshed before it expires; pass `{ forceRefresh: true }` to
+ * mint a fresh one immediately. Calls the same-origin `/__hub02/token` endpoint,
+ * which is authenticated by the HttpOnly session cookie.
+ */
+export async function fetchAuthSession(opts?: {
+  forceRefresh?: boolean;
+}): Promise<Hub02Session> {
+  if (!opts?.forceRefresh && sessionStillFresh(cachedSession)) {
+    return cachedSession;
+  }
+  if (typeof fetch === "undefined") return cachedSession ?? emptySession();
+  try {
+    const res = await fetch(HUB02_TOKEN_PATH, {
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) {
+      cachedSession = emptySession();
+      return cachedSession;
+    }
+    const data = (await res.json()) as Hub02TokenResponse;
+    if (!data.token) {
+      cachedSession = emptySession();
+      return cachedSession;
+    }
+    cachedSession = sessionFromToken(data.token, data.exp);
+    return cachedSession;
+  } catch {
+    return cachedSession ?? emptySession();
+  }
+}
+
+/** Sugar for `(await fetchAuthSession()).token`. Returns "" when unauthenticated. */
+export async function token(): Promise<string> {
+  return (await fetchAuthSession()).token;
+}
+
 /** Namespaced client object — the primary entry point. */
 export const hub02 = {
   user,
   isAuthenticated,
   onExpire,
+  fetchAuthSession,
+  token,
 };
 
 export default hub02;

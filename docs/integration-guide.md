@@ -20,8 +20,10 @@ Identity JWT    : iss="hub02", aud="tool-identity",
                   claims { sub:<user uuid>, hub_id, tool_id, iat, exp(≤5m) }
 Client identity : window.__HUB02__ (push-injected by the proxy)
                   OR  GET /__hub02/me (same-origin)
-Backend token   : proxy injects header  X-Hub02-Auth: <identity JWT>
-                  (the SDK also accepts  Authorization: Bearer <jwt>)
+Client token    : GET /__hub02/token (same-origin, cookie-auth) → { token, exp }
+                  → hub02.fetchAuthSession() / hub02.token()
+Backend token   : Authorization: Bearer <identity JWT>   (you attach it; Case 2)
+                  OR  X-Hub02-Auth: <identity JWT>        (proxy injects it; Case 1)
 Expiry signal   : 401 { authenticated:false, login_url }  → top-level redirect
 ```
 
@@ -34,8 +36,36 @@ can't drift.
 
 | Tool type | Client identity | Backend authorization |
 |---|---|---|
-| **Own-backend** | `hub02.user()` | `requireHub02User(req)` / `require_hub02_user(request)` verifies the `X-Hub02-Auth` JWT |
+| **Own-backend** | `hub02.user()` | `authenticateHub02(req)` / `authenticate_hub02(request)` verifies the Hub02 JWT |
 | **Base44 / no backend** | `hub02.user()` | none needed — identity is client-side; privileged ops route to a Hub02 function |
+
+### Where does the backend token come from? (Case 1 vs Case 2)
+
+It depends on whether your API call travels **through the Hub02 proxy** or goes to a
+**separate origin** — not on who hosts the backend.
+
+- **Case 1 — same origin (relative `/api/...`).** The proxy is in front of the request, so it
+  **injects `X-Hub02-Auth` automatically**. Your client does nothing; your axios/fetch is
+  untouched. (The proxy also strips any inbound `X-Hub02-*`, so the header can't be forged.)
+- **Case 2 — separate-origin backend (the common case).** Your frontend calls a different
+  domain the proxy doesn't front, so **you attach the token yourself** — once, with an
+  interceptor. Get the token from `hub02.fetchAuthSession()` / `hub02.token()`:
+
+```js
+import { hub02 } from "@hub02/sdk";
+import axios from "axios";
+
+const api = axios.create({ baseURL: "https://api.mytool.com" });
+api.interceptors.request.use(async (cfg) => {
+  cfg.headers.Authorization = `Bearer ${await hub02.token()}`; // cached; auto-refreshes
+  return cfg;
+});
+```
+
+`fetchAuthSession()` caches the short-lived JWT in memory and re-mints it before expiry; pass
+`{ forceRefresh: true }` to mint immediately. The token is **never persisted** — the long-lived
+credential stays in the HttpOnly cookie. Your backend verifies the `Authorization: Bearer`
+token exactly the same way (`authenticateHub02` reads `X-Hub02-Auth` or `Bearer`).
 
 ---
 
@@ -62,11 +92,11 @@ hub02.onExpire();
 ### Server (own-backend tool — Node/Express)
 
 ```js
-import { requireHub02User } from "@hub02/sdk/server";
+import { authenticateHub02 } from "@hub02/sdk/server";
 
 app.get("/my-plan", async (req, res) => {
   try {
-    const user = await requireHub02User(req);   // verifies Ed25519 vs JWKS, throws on bad token
+    const user = await authenticateHub02(req);   // verifies Ed25519 vs JWKS, throws on bad token
     res.json(getPlan(user.id));                 // trust user.id from the TOKEN, never the client
   } catch {
     res.status(401).json({ authenticated: false });
@@ -125,7 +155,7 @@ Identity tokens are short-lived (≤5 min, re-minted from the live session).
 ## 6. Security checklist
 
 - **Verify on the server.** Never trust a client-sent `user_id`. Read identity
-  only from the verified token (`requireHub02User` / `require_hub02_user`).
+  only from the verified token (`authenticateHub02` / `authenticate_hub02`).
 - **Bind to your tool.** Pass your `tool_id` (`{ toolId }` / `tool_id=`) so a
   token minted for tool A can't be replayed against tool B.
 - **Ed25519 only.** The SDK enforces `alg=EdDSA`, `iss="hub02"`,

@@ -25,6 +25,15 @@ export const HUB02_ALG = "EdDSA";
 /** Same-origin pull endpoint the proxy exposes for client identity. */
 export const HUB02_ME_PATH = "/__hub02/me";
 
+/** Same-origin endpoint the proxy exposes to mint a short-lived identity JWT. */
+export const HUB02_TOKEN_PATH = "/__hub02/token";
+
+/**
+ * Re-mint the token this many seconds before it actually expires, so an
+ * in-flight request never carries an about-to-expire token.
+ */
+export const HUB02_TOKEN_REFRESH_SKEW_SEC = 30;
+
 /**
  * Identity returned to application code.
  *
@@ -69,6 +78,35 @@ export interface Hub02WindowIdentity {
   email?: string;
   name?: string;
   exp?: number;
+}
+
+/** Shape returned by `GET /__hub02/token`. */
+export interface Hub02TokenResponse {
+  token?: string;
+  exp?: number;
+  authenticated?: boolean;
+  login_url?: string;
+}
+
+/**
+ * Amplify-style auth session returned by `hub02.fetchAuthSession()`.
+ *
+ * `token` is the short-lived signed JWT to attach as a Bearer credential.
+ * `claims` are decoded (NOT verified — verification is the backend's job).
+ */
+export interface Hub02Session {
+  /** Signed identity JWT (Bearer). Empty string when not authenticated. */
+  token: string;
+  /** Decoded token claims (unverified), or null when not authenticated. */
+  claims: Hub02Claims | null;
+  /** Durable Hub02 user UUID (token `sub`). */
+  userSub?: string;
+  hubId?: string;
+  toolId?: string;
+  /** Token expiry (epoch seconds). */
+  expiresAt?: number;
+  /** True when a non-expired token is present. */
+  isValid: boolean;
 }
 
 /** Shape returned by `GET /__hub02/me`. */

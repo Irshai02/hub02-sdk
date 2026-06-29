@@ -6,7 +6,7 @@ forwarded header (e.g. SSR frameworks where the proxy injected
 ``X-Hub02-*`` / ``window.__HUB02__`` upstream), plus the ``Hub02User`` type.
 
 For real authorization, verify the token on the server with
-:func:`hub02_sdk.server.require_hub02_user` — never trust a forwarded
+:func:`hub02_sdk.server.authenticate_hub02` — never trust a forwarded
 identity field without verifying the signed token.
 """
 

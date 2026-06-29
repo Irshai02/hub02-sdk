@@ -11,7 +11,7 @@
  *   #   curl -H "Authorization: Bearer <jwt>" localhost:3000/my-plan
  */
 import express from "express";
-import { requireHub02User, hub02Express } from "@hub02/sdk/server";
+import { authenticateHub02, hub02Auth } from "@hub02/sdk/server";
 
 const app = express();
 
@@ -21,7 +21,7 @@ const plans = new Map();
 // Option A — explicit per-route guard.
 app.get("/my-plan", async (req, res) => {
   try {
-    const user = await requireHub02User(req); // optionally { toolId: "my-tool" }
+    const user = await authenticateHub02(req); // optionally { toolId: "my-tool" }
     const plan = plans.get(user.id) ?? { user_id: user.id, items: [] };
     res.json(plan);
   } catch (err) {
@@ -30,7 +30,7 @@ app.get("/my-plan", async (req, res) => {
 });
 
 // Option B — middleware that attaches req.hub02User.
-app.use(hub02Express());
+app.use(hub02Auth());
 app.get("/me", (req, res) => res.json(req.hub02User));
 
 const port = process.env.PORT || 3000;

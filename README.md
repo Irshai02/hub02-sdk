@@ -27,17 +27,17 @@ const user = await hub02.user();          // { id, email, name } — already sig
 
 **Server** (own-backend tools):
 ```js
-import { requireHub02User } from "@hub02/sdk/server";
+import { authenticateHub02 } from "@hub02/sdk/server";
 app.get("/my-plan", async (req, res) => {
-  const user = await requireHub02User(req); // verifies Ed25519 vs JWKS
+  const user = await authenticateHub02(req); // verifies Ed25519 vs JWKS
   res.json(getPlan(user.id));               // trust user.id from the token, never the client
 });
 ```
 
 **Python server:**
 ```python
-from hub02_sdk.server import require_hub02_user
-user = require_hub02_user(request)          # raises on invalid; returns Hub02User
+from hub02_sdk.server import authenticate_hub02
+user = authenticate_hub02(request)          # raises on invalid; returns Hub02User
 ```
 
 See [`node/README.md`](./node/README.md) and [`python/README.md`](./python/README.md)
