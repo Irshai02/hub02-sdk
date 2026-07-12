@@ -6,6 +6,8 @@ import {
   onExpire,
   fetchAuthSession,
   token,
+  authHeaders,
+  authFetch,
 } from "../src/client";
 
 /** Build a fake (unsigned) JWT with the given payload — for decode tests only. */
@@ -170,12 +172,58 @@ describe("hub02.fetchAuthSession()", () => {
   });
 });
 
+describe("hub02.authHeaders() / authFetch()", () => {
+  const exp = () => Math.floor(Date.now() / 1000) + 300;
+
+  it("returns { X-Hub02-Auth } when a token is available", async () => {
+    const jwt = fakeJwt({ sub: "u-h", exp: exp() });
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ token: jwt, exp: exp() }),
+    }) as any;
+    await fetchAuthSession({ forceRefresh: true }); // prime cache
+    expect(await authHeaders()).toEqual({ "X-Hub02-Auth": jwt });
+  });
+
+  it("returns {} when there is no token (outside Hub02)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ authenticated: false }),
+    }) as any;
+    await fetchAuthSession({ forceRefresh: true });
+    expect(await authHeaders()).toEqual({});
+  });
+
+  it("authFetch merges the auth header without dropping existing ones", async () => {
+    const jwt = fakeJwt({ sub: "u-af", exp: exp() });
+    const fetchMock = vi
+      .fn()
+      // first call: mint token
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: jwt, exp: exp() }) })
+      // second call: the actual request
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+    globalThis.fetch = fetchMock as any;
+    await fetchAuthSession({ forceRefresh: true });
+
+    await authFetch("/api/x", { headers: { "X-Existing": "1" } });
+    const lastInit = fetchMock.mock.calls[fetchMock.mock.calls.length - 1][1];
+    expect(lastInit.headers).toMatchObject({
+      "X-Existing": "1",
+      "X-Hub02-Auth": jwt,
+    });
+  });
+});
+
 describe("namespaced export", () => {
-  it("exposes user/isAuthenticated/onExpire/fetchAuthSession/token", () => {
+  it("exposes the full client surface", () => {
     expect(typeof hub02.user).toBe("function");
     expect(typeof hub02.isAuthenticated).toBe("function");
     expect(typeof hub02.onExpire).toBe("function");
     expect(typeof hub02.fetchAuthSession).toBe("function");
     expect(typeof hub02.token).toBe("function");
+    expect(typeof hub02.authHeaders).toBe("function");
+    expect(typeof hub02.authFetch).toBe("function");
+    expect(typeof hub02.isHub02Domain).toBe("function");
+    expect(typeof hub02.login).toBe("function");
   });
 });

@@ -16,7 +16,12 @@
  *   });
  */
 
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+import {
+  createRemoteJWKSet,
+  decodeJwt,
+  jwtVerify,
+  type JWTVerifyGetKey,
+} from "jose";
 import {
   HUB02_ALG,
   HUB02_AUD,
@@ -158,6 +163,118 @@ export async function authenticateHub02(
   }
   const claims = await verifyHub02Token(token, opts);
   return claimsToUser(claims);
+}
+
+/**
+ * Like {@link authenticateHub02}, but returns `null` instead of throwing when
+ * the request carries NO Hub02 identity — so you can fall back to your app's
+ * own auth on the same route.
+ *
+ * Rules:
+ *  - `X-Hub02-Auth` present → verify it (throws {@link Hub02AuthError} on an
+ *    invalid/expired/tampered token — that channel is unambiguously Hub02).
+ *  - Only an `Authorization: Bearer` present → used ONLY if it is a Hub02 token
+ *    (`iss === "hub02"`); a foreign or opaque bearer is ignored (returns
+ *    `null`), so your unrelated bearer-auth routes keep working.
+ *  - Neither present → `null`.
+ *
+ * Typical use:
+ *   const hub02User = await tryAuthenticateHub02(req);
+ *   const user = hub02User
+ *     ? findOrCreateByEmail(hub02User.email)   // Hub02 identity
+ *     : myExistingAuth(req);                    // native fallback
+ */
+export async function tryAuthenticateHub02(
+  req: RequestLike,
+  opts?: VerifyOptions,
+): Promise<Hub02User | null> {
+  const direct = readHeader(req, "x-hub02-auth");
+  if (direct) {
+    const claims = await verifyHub02Token(
+      direct.replace(/^Bearer\s+/i, "").trim(),
+      opts,
+    );
+    return claimsToUser(claims);
+  }
+  const auth = readHeader(req, "authorization");
+  if (auth && /^Bearer\s+/i.test(auth)) {
+    const raw = auth.replace(/^Bearer\s+/i, "").trim();
+    let iss: unknown;
+    try {
+      iss = decodeJwt(raw).iss;
+    } catch {
+      return null; // not a JWT (opaque token) — not ours
+    }
+    if (iss !== HUB02_ISS) return null; // someone else's bearer — leave it alone
+    const claims = await verifyHub02Token(raw, opts);
+    return claimsToUser(claims);
+  }
+  return null;
+}
+
+// ---- CORS -----------------------------------------------------------------
+
+/** True when `origin` is a Hub02 tool origin (`https://*.tools.hub02.com`). */
+export function isHub02Origin(origin?: string | null): boolean {
+  if (!origin) return false;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    if (protocol !== "https:") return false;
+    return hostname === "tools.hub02.com" || hostname.endsWith(".tools.hub02.com");
+  } catch {
+    return false;
+  }
+}
+
+export interface Hub02CorsOptions {
+  /**
+   * Your existing allowed origins, combined (OR) with the Hub02 tool origins.
+   * A list of exact origins, or a predicate `(origin) => boolean`.
+   */
+  origin?: string[] | ((origin: string | undefined) => boolean);
+  /** Override the allowed request headers. Defaults include `X-Hub02-Auth`. */
+  allowedHeaders?: string[];
+  /** Override the allowed methods. */
+  methods?: string[];
+  /** Reflect credentials (cookies). Default `true`. */
+  credentials?: boolean;
+}
+
+/**
+ * Build an options object for the `cors` npm package that allows Hub02 tool
+ * origins and the `X-Hub02-Auth` header, merged with your existing config.
+ *
+ *   import cors from "cors";
+ *   app.use(cors(hub02CorsOptions({ origin: myExistingAllowList })));
+ *
+ * The returned object is a plain literal — no runtime dependency on `cors`.
+ */
+export function hub02CorsOptions(opts: Hub02CorsOptions = {}) {
+  const extra = opts.origin;
+  const allowExtra = (o?: string): boolean =>
+    Array.isArray(extra)
+      ? !!o && extra.includes(o)
+      : typeof extra === "function"
+        ? extra(o)
+        : false;
+  return {
+    origin(
+      origin: string | undefined,
+      cb: (err: Error | null, allow?: boolean) => void,
+    ): void {
+      // No Origin header = same-origin / server-to-server → allow.
+      cb(null, !origin || isHub02Origin(origin) || allowExtra(origin));
+    },
+    allowedHeaders: opts.allowedHeaders ?? [
+      "Content-Type",
+      "Authorization",
+      "X-Hub02-Auth",
+      "X-User-Email",
+    ],
+    methods: opts.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    optionsSuccessStatus: 204,
+    credentials: opts.credentials ?? true,
+  };
 }
 
 // ---- Express middleware -------------------------------------------------

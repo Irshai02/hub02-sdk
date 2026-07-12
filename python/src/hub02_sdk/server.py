@@ -35,9 +35,12 @@ from ._shared import (
 __all__ = [
     "verify_hub02_token",
     "authenticate_hub02",
+    "try_authenticate_hub02",
     "extract_token",
     "fastapi_dependency",
     "flask_authenticate_hub02",
+    "is_hub02_origin",
+    "hub02_cors_kwargs",
     "Hub02User",
     "Hub02Claims",
     "Hub02AuthError",
@@ -221,6 +224,89 @@ def authenticate_hub02(
         leeway=leeway,
     )
     return claims_to_user(claims)
+
+
+def try_authenticate_hub02(
+    request: Any,
+    *,
+    tool_id: Optional[str] = None,
+    jwks_url: str = HUB02_JWKS_URL,
+    jwks_client: Any = None,
+    leeway: int = 5,
+) -> Optional[Hub02User]:
+    """Like :func:`authenticate_hub02`, but return ``None`` when the request
+    carries NO Hub02 identity — so you can fall back to your app's own auth.
+
+    Rules:
+      * ``X-Hub02-Auth`` present -> verify it (raises :class:`Hub02AuthError`
+        on an invalid token; that channel is unambiguously Hub02).
+      * Only an ``Authorization: Bearer`` present -> used ONLY if it is a Hub02
+        token (``iss == "hub02"``); a foreign/opaque bearer is ignored
+        (returns ``None``), so unrelated bearer-auth routes keep working.
+      * Neither present -> ``None``.
+    """
+    direct = _get_header(request, "X-Hub02-Auth")
+    if direct:
+        raw = direct[7:].strip() if direct.lower().startswith("bearer ") else direct.strip()
+        return claims_to_user(
+            verify_hub02_token(
+                raw, tool_id=tool_id, jwks_url=jwks_url, jwks_client=jwks_client, leeway=leeway
+            )
+        )
+    auth = _get_header(request, "Authorization")
+    if auth and auth.lower().startswith("bearer "):
+        raw = auth[7:].strip()
+        try:
+            unverified = jwt.decode(raw, options={"verify_signature": False})
+        except Exception:  # noqa: BLE001  (opaque / non-JWT bearer)
+            return None
+        if unverified.get("iss") != HUB02_ISS:
+            return None  # someone else's bearer — leave it alone
+        return claims_to_user(
+            verify_hub02_token(
+                raw, tool_id=tool_id, jwks_url=jwks_url, jwks_client=jwks_client, leeway=leeway
+            )
+        )
+    return None
+
+
+# --------------------------------------------------------------------------
+# CORS
+# --------------------------------------------------------------------------
+
+
+def is_hub02_origin(origin: Optional[str]) -> bool:
+    """True when ``origin`` is a Hub02 tool origin (``https://*.tools.hub02.com``)."""
+    if not origin:
+        return False
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(origin)
+    except Exception:  # noqa: BLE001
+        return False
+    if parsed.scheme != "https":
+        return False
+    host = parsed.hostname or ""
+    return host == "tools.hub02.com" or host.endswith(".tools.hub02.com")
+
+
+def hub02_cors_kwargs(**overrides: Any) -> dict[str, Any]:
+    """kwargs for Starlette/FastAPI ``CORSMiddleware`` that allow Hub02 tool
+    origins and the ``X-Hub02-Auth`` header. Override any key as needed::
+
+        from fastapi.middleware.cors import CORSMiddleware
+        from hub02_sdk.server import hub02_cors_kwargs
+        app.add_middleware(CORSMiddleware, **hub02_cors_kwargs(allow_origins=[...]))
+    """
+    kwargs: dict[str, Any] = {
+        "allow_origin_regex": r"https://(.*\.)?tools\.hub02\.com",
+        "allow_headers": ["Content-Type", "Authorization", "X-Hub02-Auth", "X-User-Email"],
+        "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_credentials": True,
+    }
+    kwargs.update(overrides)
+    return kwargs
 
 
 # --------------------------------------------------------------------------

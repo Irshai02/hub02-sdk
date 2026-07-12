@@ -230,6 +230,49 @@ export async function token(): Promise<string> {
   return (await fetchAuthSession()).token;
 }
 
+/** Header name the Hub02 gate and backends expect the identity token under. */
+export const HUB02_AUTH_HEADER = "X-Hub02-Auth";
+
+/**
+ * Ready-to-spread auth header for calls to your backend.
+ *
+ * Returns `{ "X-Hub02-Auth": <token> }` when running inside Hub02, or `{}`
+ * otherwise — so a request outside Hub02 carries nothing extra and your app's
+ * existing auth is left untouched.
+ *
+ *   // fetch:
+ *   fetch(url, { headers: { ...myHeaders, ...(await hub02.authHeaders()) } });
+ *
+ *   // axios (once, in an interceptor):
+ *   api.interceptors.request.use(async (c) => {
+ *     Object.assign(c.headers, await hub02.authHeaders());
+ *     return c;
+ *   });
+ */
+export async function authHeaders(): Promise<Record<string, string>> {
+  const t = await token();
+  return t ? { [HUB02_AUTH_HEADER]: t } : {};
+}
+
+/**
+ * `fetch` that auto-attaches the Hub02 identity header when inside Hub02.
+ *
+ * Same signature as the global `fetch`; existing headers are preserved. Outside
+ * Hub02 it's a plain `fetch` (no header added).
+ *
+ *   const res = await hub02.authFetch("/api/tenants");
+ */
+export async function authFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const extra = await authHeaders();
+  return fetch(input, {
+    ...init,
+    headers: { ...(init.headers as Record<string, string> | undefined), ...extra },
+  });
+}
+
 /**
  * True when the app is running inside Hub02 (behind the Hub02 gate) — i.e. the
  * visitor arrived through Hub02 and is already signed in. Use it to decide
@@ -273,6 +316,8 @@ export const hub02 = {
   onExpire,
   fetchAuthSession,
   token,
+  authHeaders,
+  authFetch,
   isHub02Domain,
   login,
 };

@@ -112,3 +112,64 @@ def test_require_user_with_request_headers_object(keys: KeyPair, jwks: MockJwks)
     req = FakeReq({"x-hub02-auth": token})
     user = authenticate_hub02(req, jwks_client=jwks)
     assert user.id == "u-hdr"
+
+
+# --- try_authenticate_hub02 / CORS helpers --------------------------------
+
+
+def test_try_auth_returns_user_for_valid_hub02_header(keys: KeyPair, jwks: MockJwks):
+    from hub02_sdk.server import try_authenticate_hub02
+
+    token = mint_token(keys, sub="u-try")
+    user = try_authenticate_hub02({"X-Hub02-Auth": token}, jwks_client=jwks)
+    assert user is not None and user.id == "u-try"
+
+
+def test_try_auth_returns_none_when_absent(jwks: MockJwks):
+    from hub02_sdk.server import try_authenticate_hub02
+
+    assert try_authenticate_hub02({}, jwks_client=jwks) is None
+
+
+def test_try_auth_raises_on_invalid_hub02_header(jwks: MockJwks):
+    from hub02_sdk.server import try_authenticate_hub02
+
+    with pytest.raises(Hub02AuthError):
+        try_authenticate_hub02({"X-Hub02-Auth": "garbage"}, jwks_client=jwks)
+
+
+def test_try_auth_uses_hub02_bearer(keys: KeyPair, jwks: MockJwks):
+    from hub02_sdk.server import try_authenticate_hub02
+
+    token = mint_token(keys, sub="u-bearer")
+    user = try_authenticate_hub02({"Authorization": f"Bearer {token}"}, jwks_client=jwks)
+    assert user is not None and user.id == "u-bearer"
+
+
+def test_try_auth_ignores_foreign_and_opaque_bearer(keys: KeyPair, jwks: MockJwks):
+    from hub02_sdk.server import try_authenticate_hub02
+
+    foreign = mint_token(keys, iss="other-idp")  # valid JWT, wrong issuer
+    assert try_authenticate_hub02({"Authorization": f"Bearer {foreign}"}, jwks_client=jwks) is None
+    assert try_authenticate_hub02({"Authorization": "Bearer opaque-123"}, jwks_client=jwks) is None
+
+
+def test_is_hub02_origin():
+    from hub02_sdk.server import is_hub02_origin
+
+    assert is_hub02_origin("https://parlex-test.tools.hub02.com") is True
+    assert is_hub02_origin("https://tools.hub02.com") is True
+    assert is_hub02_origin("https://evil.com") is False
+    assert is_hub02_origin("http://x.tools.hub02.com") is False
+    assert is_hub02_origin("https://tools.hub02.com.evil.com") is False
+    assert is_hub02_origin(None) is False
+
+
+def test_hub02_cors_kwargs_defaults_and_override():
+    from hub02_sdk.server import hub02_cors_kwargs
+
+    k = hub02_cors_kwargs()
+    assert "X-Hub02-Auth" in k["allow_headers"]
+    assert k["allow_credentials"] is True
+    k2 = hub02_cors_kwargs(allow_origins=["https://my.com"])
+    assert k2["allow_origins"] == ["https://my.com"]

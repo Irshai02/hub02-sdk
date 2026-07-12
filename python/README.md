@@ -67,10 +67,13 @@ def my_plan():
 | Name | Signature | Purpose |
 |---|---|---|
 | `verify_hub02_token` | `(token, *, tool_id=None, jwks_url=…, leeway=5) -> Hub02Claims` | Verify Ed25519 token vs JWKS; checks `iss`/`aud`/`exp`/optional `tool_id`. Raises `Hub02AuthError`. |
-| `authenticate_hub02` | `(request, *, tool_id=None, …) -> Hub02User` | Extract + verify token from a request; raises `Hub02AuthError` (status 401). |
+| `authenticate_hub02` | `(request, *, tool_id=None, …) -> Hub02User` | Require Hub02 auth: extract + verify; raises `Hub02AuthError` (status 401). |
+| `try_authenticate_hub02` | `(request, *, …) -> Hub02User \| None` | Optional auth: `None` when no Hub02 identity (fall back to native); raises only on an invalid `X-Hub02-Auth`; **ignores foreign/opaque bearer tokens**. |
 | `extract_token` | `(request) -> str | None` | Pull token from `X-Hub02-Auth` / `Authorization: Bearer`. |
 | `fastapi_dependency` | `(*, tool_id=None, …) -> Depends-able` | FastAPI dependency returning `Hub02User`; raises `HTTPException(401)`. |
 | `flask_authenticate_hub02` | `(*, tool_id=None, …) -> Hub02User` | Flask helper using `flask.request`. |
+| `is_hub02_origin` | `(origin) -> bool` | True for `https://*.tools.hub02.com`. |
+| `hub02_cors_kwargs` | `(**overrides) -> dict` | kwargs for `CORSMiddleware`: allows Hub02 origins + `X-Hub02-Auth`. |
 | `Hub02User` | dataclass `{ id, hub_id, tool_id, email, name }` | Trusted identity. Key data on `id`. |
 | `Hub02Claims` | dict subclass | Raw verified claims. |
 | `Hub02AuthError` | exception (`status = 401`) | Raised on any verification failure. |

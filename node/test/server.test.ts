@@ -2,10 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   verifyHub02Token,
   authenticateHub02,
+  tryAuthenticateHub02,
   extractToken,
   hub02Auth,
+  isHub02Origin,
+  hub02CorsOptions,
   Hub02AuthError,
 } from "../src/server";
+import { SignJWT, generateKeyPair } from "jose";
 import { makeKeys, mintToken, mockJwks, type TestKeys } from "./helpers";
 
 let keys: TestKeys;
@@ -139,6 +143,88 @@ describe("authenticateHub02", () => {
       expect(err).toBeInstanceOf(Hub02AuthError);
       expect((err as Hub02AuthError).status).toBe(401);
     }
+  });
+});
+
+describe("tryAuthenticateHub02", () => {
+  it("returns the user for a valid X-Hub02-Auth token", async () => {
+    const token = await mintToken(keys, { sub: "u-try" });
+    const user = await tryAuthenticateHub02(
+      { headers: { "x-hub02-auth": token } },
+      { jwks },
+    );
+    expect(user?.id).toBe("u-try");
+  });
+
+  it("returns null when no identity is present (fall back to native)", async () => {
+    expect(await tryAuthenticateHub02({ headers: {} }, { jwks })).toBeNull();
+  });
+
+  it("throws on a present-but-invalid X-Hub02-Auth token", async () => {
+    await expect(
+      tryAuthenticateHub02({ headers: { "x-hub02-auth": "garbage" } }, { jwks }),
+    ).rejects.toBeInstanceOf(Hub02AuthError);
+  });
+
+  it("uses an Authorization Bearer only when it is a Hub02 token", async () => {
+    const token = await mintToken(keys, { sub: "u-bearer" });
+    const user = await tryAuthenticateHub02(
+      { headers: { authorization: `Bearer ${token}` } },
+      { jwks },
+    );
+    expect(user?.id).toBe("u-bearer");
+  });
+
+  it("ignores a foreign JWT bearer (iss !== hub02) → null", async () => {
+    const { privateKey } = await generateKeyPair("EdDSA", { crv: "Ed25519" });
+    const foreign = await new SignJWT({})
+      .setProtectedHeader({ alg: "EdDSA" })
+      .setIssuer("some-other-idp")
+      .setSubject("x")
+      .sign(privateKey);
+    expect(
+      await tryAuthenticateHub02(
+        { headers: { authorization: `Bearer ${foreign}` } },
+        { jwks },
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores an opaque (non-JWT) bearer → null", async () => {
+    expect(
+      await tryAuthenticateHub02(
+        { headers: { authorization: "Bearer opaque-token-123" } },
+        { jwks },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("isHub02Origin / hub02CorsOptions", () => {
+  it("accepts *.tools.hub02.com over https", () => {
+    expect(isHub02Origin("https://parlex-test.tools.hub02.com")).toBe(true);
+    expect(isHub02Origin("https://tools.hub02.com")).toBe(true);
+  });
+  it("rejects other origins and non-https", () => {
+    expect(isHub02Origin("https://evil.com")).toBe(false);
+    expect(isHub02Origin("http://x.tools.hub02.com")).toBe(false);
+    expect(isHub02Origin("https://tools.hub02.com.evil.com")).toBe(false);
+    expect(isHub02Origin(undefined)).toBe(false);
+  });
+
+  it("cors options allow Hub02 origins, no-origin, and extra allow-list", () => {
+    const opts = hub02CorsOptions({ origin: ["https://my-app.com"] });
+    const allow = (o?: string) =>
+      new Promise<boolean>((resolve) =>
+        opts.origin(o, (_e, ok) => resolve(!!ok)),
+      );
+    expect(opts.allowedHeaders).toContain("X-Hub02-Auth");
+    return Promise.all([
+      allow("https://x.tools.hub02.com").then((v) => expect(v).toBe(true)),
+      allow("https://my-app.com").then((v) => expect(v).toBe(true)),
+      allow(undefined).then((v) => expect(v).toBe(true)),
+      allow("https://evil.com").then((v) => expect(v).toBe(false)),
+    ]);
   });
 });
 
