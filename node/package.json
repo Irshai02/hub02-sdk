@@ -1,6 +1,6 @@
 {
   "name": "@hub02/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hub02 tool-identity SDK — read the signed-in user on the client and verify Hub02 identity tokens (Ed25519) on your backend.",
   "license": "MIT",
   "type": "module",

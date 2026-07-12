@@ -230,6 +230,42 @@ export async function token(): Promise<string> {
   return (await fetchAuthSession()).token;
 }
 
+/**
+ * True when the app is running inside Hub02 (behind the Hub02 gate) — i.e. the
+ * visitor arrived through Hub02 and is already signed in. Use it to decide
+ * whether to bypass your app's own login screen. Detects the Hub02 tool domain
+ * (`*.tools.hub02.com`) or the proxy-injected `window.__HUB02__`.
+ *
+ * For a definitive identity check, use `await hub02.user()` (non-null only in
+ * Hub02 context). `isHub02Domain()` is the cheap synchronous signal.
+ */
+export function isHub02Domain(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.__HUB02__) return true;
+  return /\.tools\.hub02\.com$/i.test(window.location.hostname);
+}
+
+/**
+ * Send the user to Hub02 sign-in (e.g. after logout, or if identity is missing).
+ * Uses the `login_url` the gate provides, falling back to Hub02's auth page.
+ */
+export async function login(): Promise<void> {
+  if (typeof window === "undefined") return;
+  let url: string | undefined;
+  try {
+    const me = (await fetch(HUB02_ME_PATH, {
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }).then((r) => r.json())) as Hub02MeResponse;
+    url = me?.login_url;
+  } catch {
+    /* fall through to default */
+  }
+  window.location.href =
+    url ??
+    `https://hub02.com/auth?mode=signin&return_url=${encodeURIComponent(window.location.href)}`;
+}
+
 /** Namespaced client object — the primary entry point. */
 export const hub02 = {
   user,
@@ -237,6 +273,8 @@ export const hub02 = {
   onExpire,
   fetchAuthSession,
   token,
+  isHub02Domain,
+  login,
 };
 
 export default hub02;
