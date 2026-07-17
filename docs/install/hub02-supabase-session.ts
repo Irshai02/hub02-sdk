@@ -18,12 +18,17 @@ const HUB02_JWKS = createRemoteJWKSet(
   new URL("https://ddeubhasvmeqwtzgkunt.supabase.co/functions/v1/jwks"),
 );
 
-// Allow the Hub02 tool origins (and same-origin) to send X-Hub02-Auth.
-function corsHeaders(origin: string | null): Record<string, string> {
+// Allow the Hub02 tool origins to send X-Hub02-Auth. Reflect the preflight's
+// requested headers so client headers like supabase-js's `x-client-info` (and
+// `apikey`) never break the preflight.
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin");
   const ok = !!origin && /^https:\/\/([a-z0-9-]+\.)?tools\.hub02\.com$/i.test(origin);
+  const reqHeaders = req.headers.get("access-control-request-headers");
   return {
     "Access-Control-Allow-Origin": ok ? (origin as string) : "https://tools.hub02.com",
-    "Access-Control-Allow-Headers": "authorization, x-hub02-auth, content-type, apikey",
+    "Access-Control-Allow-Headers":
+      reqHeaders || "authorization, x-hub02-auth, x-client-info, content-type, apikey",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   };
@@ -37,7 +42,7 @@ function json(body: unknown, status: number, cors: Record<string, string>): Resp
 }
 
 Deno.serve(async (req) => {
-  const cors = corsHeaders(req.headers.get("origin"));
+  const cors = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
   try {
