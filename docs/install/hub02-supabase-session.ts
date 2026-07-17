@@ -82,20 +82,22 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_ANON_KEY")!,
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
-    const { data: verified, error: vErr } = await anon.auth.verifyOtp({
-      token_hash: tokenHash,
-      type: "email",
-    });
-    if (vErr || !verified?.session) {
+    // A magic-link token_hash verifies as "email" on newer Supabase and
+    // "magiclink" on older — try both so version differences can't break it.
+    let session: { access_token: string; refresh_token: string; expires_at?: number } | null = null;
+    for (const type of ["email", "magiclink"] as const) {
+      const { data: v } = await anon.auth.verifyOtp({ token_hash: tokenHash, type });
+      if (v?.session) { session = v.session; break; }
+    }
+    if (!session) {
       // Fallback: let the client verify the one-time token itself.
       return json({ token_hash: tokenHash }, 200, cors);
     }
-
     return json(
       {
-        access_token: verified.session.access_token,
-        refresh_token: verified.session.refresh_token,
-        expires_at: verified.session.expires_at,
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        expires_at: session.expires_at,
       },
       200,
       cors,

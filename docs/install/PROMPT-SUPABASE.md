@@ -74,9 +74,14 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!,
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
-    const { data: v, error: vErr } = await anon.auth.verifyOtp({ token_hash: tokenHash, type: "email" });
-    if (vErr || !v?.session) return json({ token_hash: tokenHash }, 200, cors);
-    return json({ access_token: v.session.access_token, refresh_token: v.session.refresh_token, expires_at: v.session.expires_at }, 200, cors);
+    // magic-link token_hash verifies as "email" (newer) or "magiclink" (older) — try both.
+    let session: any = null;
+    for (const type of ["email", "magiclink"] as const) {
+      const { data: v } = await anon.auth.verifyOtp({ token_hash: tokenHash, type });
+      if (v?.session) { session = v.session; break; }
+    }
+    if (!session) return json({ token_hash: tokenHash }, 200, cors);
+    return json({ access_token: session.access_token, refresh_token: session.refresh_token, expires_at: session.expires_at }, 200, cors);
   } catch (e) {
     return json({ error: "unauthorized", detail: String((e as any)?.message || e) }, 401, cors);
   }
