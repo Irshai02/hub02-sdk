@@ -9,6 +9,7 @@ import {
   authHeaders,
   authFetch,
   installFetchInterceptor,
+  connectSupabase,
 } from "../src/client";
 
 /** Build a fake (unsigned) JWT with the given payload — for decode tests only. */
@@ -293,6 +294,87 @@ describe("hub02.installFetchInterceptor()", () => {
   });
 });
 
+describe("hub02.connectSupabase()", () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  function fakeSupabase(overrides: Partial<{
+    session: unknown;
+    invokeData: unknown;
+    invokeError: unknown;
+  }> = {}) {
+    const calls: Record<string, unknown[]> = {};
+    return {
+      calls,
+      auth: {
+        getSession: vi.fn(async () => ({ data: { session: overrides.session ?? null } })),
+        setSession: vi.fn(async (t: unknown) => {
+          calls.setSession = [t];
+          return { data: { session: { via: "setSession" } }, error: null };
+        }),
+        verifyOtp: vi.fn(async (p: unknown) => {
+          calls.verifyOtp = [p];
+          return { data: { session: { via: "verifyOtp" } }, error: null };
+        }),
+      },
+      functions: {
+        invoke: vi.fn(async (name: string, o: unknown) => {
+          calls.invoke = [name, o];
+          return { data: overrides.invokeData ?? null, error: overrides.invokeError ?? null };
+        }),
+      },
+    };
+  }
+
+  function primeToken() {
+    const jwt = fakeJwt({ sub: "u-sb", email: "s@b.com", exp: now() + 300 });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ token: jwt, exp: now() + 300 }) }) as any;
+    return jwt;
+  }
+
+  it("returns null and does nothing when not inside Hub02 (no token)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }) as any;
+    await fetchAuthSession({ forceRefresh: true });
+    const sb = fakeSupabase();
+    expect(await connectSupabase(sb as any)).toBeNull();
+    expect(sb.functions.invoke).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing Supabase session (no exchange)", async () => {
+    primeToken();
+    await fetchAuthSession({ forceRefresh: true });
+    const sb = fakeSupabase({ session: { existing: true } });
+    const s = await connectSupabase(sb as any);
+    expect(s).toEqual({ existing: true });
+    expect(sb.functions.invoke).not.toHaveBeenCalled();
+  });
+
+  it("exchanges via the edge function and verifies token_hash", async () => {
+    const jwt = primeToken();
+    await fetchAuthSession({ forceRefresh: true });
+    const sb = fakeSupabase({ invokeData: { token_hash: "th-123" } });
+    const s = await connectSupabase(sb as any);
+    expect(sb.functions.invoke).toHaveBeenCalledWith(
+      "hub02-supabase-session",
+      { headers: { "X-Hub02-Auth": jwt } },
+    );
+    expect(sb.calls.verifyOtp?.[0]).toEqual({ token_hash: "th-123", type: "email" });
+    expect(s).toEqual({ via: "verifyOtp" });
+  });
+
+  it("accepts an access/refresh token pair via setSession", async () => {
+    primeToken();
+    await fetchAuthSession({ forceRefresh: true });
+    const sb = fakeSupabase({
+      invokeData: { access_token: "at", refresh_token: "rt" },
+    });
+    const s = await connectSupabase(sb as any);
+    expect(sb.calls.setSession?.[0]).toEqual({ access_token: "at", refresh_token: "rt" });
+    expect(s).toEqual({ via: "setSession" });
+  });
+});
+
 describe("namespaced export", () => {
   it("exposes the full client surface", () => {
     expect(typeof hub02.user).toBe("function");
@@ -303,6 +385,7 @@ describe("namespaced export", () => {
     expect(typeof hub02.authHeaders).toBe("function");
     expect(typeof hub02.authFetch).toBe("function");
     expect(typeof hub02.installFetchInterceptor).toBe("function");
+    expect(typeof hub02.connectSupabase).toBe("function");
     expect(typeof hub02.isHub02Domain).toBe("function");
     expect(typeof hub02.login).toBe("function");
   });

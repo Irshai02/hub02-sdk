@@ -7,6 +7,7 @@ Give each agent the prompt for the repo it's working in:
 |------|--------|--------------|
 | **Frontend** (the app UI) | [`PROMPT-CLIENT.md`](./PROMPT-CLIENT.md) | Skip the app's own login inside Hub02; attach the identity token to backend calls. |
 | **Backend** (the API) | [`PROMPT-BACKEND.md`](./PROMPT-BACKEND.md) | Verify the token, link users by email (one account), fix CORS for the `X-Hub02-Auth` header. |
+| **Supabase + RLS** (direct `supabase.from(...)`) | [`PROMPT-SUPABASE.md`](./PROMPT-SUPABASE.md) | Give the Hub02 visitor a real Supabase session so RLS queries keep working (fixes `42501`). Use **instead of** the backend prompt when your data is Supabase RLS, not a separate API. |
 
 Each prompt is **self-contained** (no URL-fetching), **additive-only** (never
 replaces your existing auth/DB), and copy-paste ready.
@@ -27,7 +28,8 @@ replaces your existing auth/DB), and copy-paste ready.
 
 ## SDK helpers that do the heavy lifting
 **Client** (`@hub02/sdk`): `hub02.installFetchInterceptor()` (one-line backend wiring),
-`hub02.user()` (email auto-filled), `hub02.token()`, `hub02.authHeaders()`, `hub02.authFetch()`,
+`hub02.connectSupabase(supabase)` (one-line Supabase-RLS session), `hub02.user()` (email
+auto-filled), `hub02.token()`, `hub02.authHeaders()`, `hub02.authFetch()`,
 `hub02.isHub02Domain()`, `hub02.login()`.
 **Backend** (`@hub02/sdk/server` · `hub02-sdk`): `tryAuthenticateHub02()` /
 `try_authenticate_hub02()` (verify + fall back to native), `hub02CorsOptions()` /

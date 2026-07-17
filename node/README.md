@@ -117,6 +117,7 @@ app.get("/me", (req, res) => res.json(req.hub02User));
 | `hub02.fetchAuthSession` / `fetchAuthSession` | `({forceRefresh?}) => Promise<Hub02Session>` | Mint/reuse the short-lived JWT via `/__hub02/token`; cached in memory, auto-refreshed. |
 | `hub02.token` / `token` | `() => Promise<string>` | Sugar for `(await fetchAuthSession()).token`. `""` when unauthenticated. |
 | `hub02.installFetchInterceptor` / `installFetchInterceptor` | `(opts?) => () => void` | Wrap `window.fetch` once so backend requests carry `X-Hub02-Auth`. Skips `/__hub02/*` + third parties; idempotent; returns an uninstaller. `opts.shouldAttach?(url)` overrides the target check. |
+| `hub02.connectSupabase` / `connectSupabase` | `(supabase, opts?) => Promise<session \| null>` | Exchange the Hub02 identity for a real Supabase session (via the `hub02-supabase-session` Edge Function) so RLS + `supabase.from(...)` keep working inside Hub02. No-op outside Hub02. |
 | `hub02.authHeaders` / `authHeaders` | `() => Promise<Record<string,string>>` | `{ "X-Hub02-Auth": token }` inside Hub02, else `{}`. Spread into any request. |
 | `hub02.authFetch` / `authFetch` | `(input, init?) => Promise<Response>` | `fetch` that auto-attaches the header; preserves existing headers. |
 | `hub02.isHub02Domain` / `isHub02Domain` | `() => boolean` | Synchronous: is the app running inside Hub02 (`*.tools.hub02.com` or `window.__HUB02__`)? |

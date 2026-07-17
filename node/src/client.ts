@@ -435,6 +435,106 @@ export async function login(): Promise<void> {
     `https://hub02.com/auth?mode=signin&return_url=${encodeURIComponent(window.location.href)}`;
 }
 
+// ---- Supabase session bridge --------------------------------------------
+
+/**
+ * Minimal structural shape of a `@supabase/supabase-js` v2 client — just the
+ * bits we touch. Keeps the SDK dependency-free while accepting a real client.
+ */
+export interface SupabaseLikeClient {
+  auth: {
+    getSession(): Promise<{ data: { session: unknown | null } }>;
+    setSession(t: {
+      access_token: string;
+      refresh_token: string;
+    }): Promise<{ data: { session: unknown | null }; error: unknown }>;
+    verifyOtp(p: {
+      token_hash: string;
+      type: string;
+    }): Promise<{ data: { session: unknown | null }; error: unknown }>;
+  };
+  functions: {
+    invoke(
+      name: string,
+      opts?: { headers?: Record<string, string>; body?: unknown },
+    ): Promise<{ data: unknown; error: unknown }>;
+  };
+}
+
+export interface ConnectSupabaseOptions {
+  /** Edge function name that exchanges the Hub02 token for a Supabase session. */
+  functionName?: string;
+  /** Re-exchange even if a Supabase session already exists. Default false. */
+  force?: boolean;
+}
+
+/**
+ * Give the browser a real **Supabase** session derived from the Hub02 identity,
+ * so your existing `supabase.from(...)` queries and RLS keep working unchanged
+ * inside Hub02 (no direct-PostgREST 401s).
+ *
+ * Call it once at startup, before loading data:
+ *
+ *   import { createClient } from "@supabase/supabase-js";
+ *   import { hub02 } from "@hub02/sdk";
+ *   const supabase = createClient(URL, ANON_KEY);
+ *   await hub02.connectSupabase(supabase);   // no-op outside Hub02
+ *
+ * Requires the companion `hub02-supabase-session` Edge Function (see the Supabase
+ * install prompt) which verifies `X-Hub02-Auth` and returns a session for the
+ * account linked to the verified email.
+ *
+ * Returns the Supabase session (opaque) or `null` when not inside Hub02 / on
+ * failure — in which case your native login is left untouched.
+ */
+export async function connectSupabase(
+  supabase: SupabaseLikeClient,
+  opts?: ConnectSupabaseOptions,
+): Promise<unknown | null> {
+  // Outside Hub02 → do nothing, leave the app's own auth alone.
+  const tok = await token();
+  if (!tok) return null;
+
+  if (!opts?.force) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) return data.session; // already connected
+    } catch {
+      /* fall through and try to exchange */
+    }
+  }
+
+  const fnName = opts?.functionName ?? "hub02-supabase-session";
+  try {
+    const { data, error } = await supabase.functions.invoke(fnName, {
+      headers: { [HUB02_AUTH_HEADER]: tok },
+    });
+    if (error || !data) return null;
+    const d = data as {
+      token_hash?: string;
+      access_token?: string;
+      refresh_token?: string;
+    };
+    if (d.access_token && d.refresh_token) {
+      const { data: s } = await supabase.auth.setSession({
+        access_token: d.access_token,
+        refresh_token: d.refresh_token,
+      });
+      return s?.session ?? null;
+    }
+    if (d.token_hash) {
+      const { data: s } = await supabase.auth.verifyOtp({
+        token_hash: d.token_hash,
+        type: "email",
+      });
+      return s?.session ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Namespaced client object — the primary entry point. */
 export const hub02 = {
   user,
@@ -445,6 +545,7 @@ export const hub02 = {
   authHeaders,
   authFetch,
   installFetchInterceptor,
+  connectSupabase,
   isHub02Domain,
   login,
 };
