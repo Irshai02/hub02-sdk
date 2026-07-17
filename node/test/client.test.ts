@@ -8,6 +8,7 @@ import {
   token,
   authHeaders,
   authFetch,
+  installFetchInterceptor,
 } from "../src/client";
 
 /** Build a fake (unsigned) JWT with the given payload — for decode tests only. */
@@ -214,6 +215,84 @@ describe("hub02.authHeaders() / authFetch()", () => {
   });
 });
 
+describe("hub02.user() email enrichment", () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  it("fills email/name from the token when /__hub02/me omits them", async () => {
+    const exp = now() + 300;
+    const jwt = fakeJwt({ sub: "u-e", email: "e@fill.com", name: "Fill", exp });
+    globalThis.fetch = vi.fn(async (url: any) => {
+      if (String(url).includes("/__hub02/token"))
+        return { ok: true, json: async () => ({ token: jwt, exp }) };
+      // /__hub02/me: authenticated, but NO email/name (launch-cookie gate).
+      return { ok: true, json: async () => ({ authenticated: true, user_id: "u-e" }) };
+    }) as any;
+
+    await fetchAuthSession({ forceRefresh: true }); // prime the token cache
+    const u = await user();
+    expect(u?.id).toBe("u-e");
+    expect(u?.email).toBe("e@fill.com"); // pulled from the token, not /me
+    expect(u?.name).toBe("Fill");
+  });
+
+  it("does NOT fetch the token when /me already has the email", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ authenticated: true, user_id: "u-h", email: "has@me.com" }),
+    }));
+    globalThis.fetch = fetchMock as any;
+    const u = await user();
+    expect(u?.email).toBe("has@me.com");
+    // only /me was called — no /__hub02/token round-trip.
+    expect(fetchMock.mock.calls.every((c) => !String(c[0]).includes("/token"))).toBe(true);
+  });
+});
+
+describe("hub02.installFetchInterceptor()", () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  it("attaches to backend, skips /__hub02/ + third parties, idempotent, uninstalls", async () => {
+    const exp = now() + 300;
+    const jwt = fakeJwt({ sub: "u-i", exp });
+    // Token mint goes through the global fetch:
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ token: jwt, exp }) }) as any;
+    await fetchAuthSession({ forceRefresh: true }); // prime token cache
+
+    // The app's real fetch that the interceptor wraps:
+    const original = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    globalThis.window.location = {
+      origin: "https://tool.example",
+      href: "https://tool.example/app",
+      hostname: "tool.example",
+    };
+    globalThis.window.fetch = original;
+
+    const uninstall = installFetchInterceptor();
+    const secondNoop = installFetchInterceptor(); // idempotent — must not re-wrap
+    expect((globalThis.window.fetch as any).__hub02__).toBe(true);
+
+    const headerOf = () => {
+      const init = original.mock.calls.at(-1)?.[1];
+      return new Headers(init?.headers || {}).get("X-Hub02-Auth");
+    };
+
+    await (globalThis.window.fetch as any)("https://tool.example/api/trips"); // same-origin backend
+    expect(headerOf()).toBe(jwt);
+
+    await (globalThis.window.fetch as any)("https://tool.example/__hub02/token"); // SDK-internal
+    expect(headerOf()).toBeNull();
+
+    await (globalThis.window.fetch as any)("https://evil.com/collect"); // third party
+    expect(headerOf()).toBeNull();
+
+    uninstall();
+    expect(globalThis.window.fetch).toBe(original);
+    secondNoop(); // no-op, safe to call
+  });
+});
+
 describe("namespaced export", () => {
   it("exposes the full client surface", () => {
     expect(typeof hub02.user).toBe("function");
@@ -223,6 +302,7 @@ describe("namespaced export", () => {
     expect(typeof hub02.token).toBe("function");
     expect(typeof hub02.authHeaders).toBe("function");
     expect(typeof hub02.authFetch).toBe("function");
+    expect(typeof hub02.installFetchInterceptor).toBe("function");
     expect(typeof hub02.isHub02Domain).toBe("function");
     expect(typeof hub02.login).toBe("function");
   });

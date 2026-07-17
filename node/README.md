@@ -33,19 +33,27 @@ hub02.onExpire(({ login_url }) => showBanner(login_url));
 
 Attach the Hub02 identity to requests that go to a backend **not** behind the Hub02 proxy.
 The token is short-lived, cached in memory, and refreshed before expiry (never persisted —
-the long-lived credential stays in the HttpOnly cookie). Easiest is `authHeaders()` /
-`authFetch()`, which add nothing when the app isn't running inside Hub02:
+the long-lived credential stays in the HttpOnly cookie).
 
+**Easiest — one line at your app entry:**
 ```js
-// axios — wire it once:
+import { hub02 } from "@hub02/sdk";
+hub02.installFetchInterceptor();   // adds X-Hub02-Auth to your backend requests, safely
+```
+`installFetchInterceptor()` wraps `window.fetch` for you and handles the footguns: it only
+attaches to your own backend (same-origin + Supabase Edge Functions by default — override with
+`{ shouldAttach }`), never to third parties, and **never** to Hub02's own `/__hub02/*` endpoints
+(intercepting those recurses into token-minting → request storm). Outside Hub02 it adds nothing.
+
+**Or attach yourself** with `authHeaders()` / `authFetch()`:
+```js
+// axios:
 api.interceptors.request.use(async (cfg) => {
-  Object.assign(cfg.headers, await hub02.authHeaders());  // { "X-Hub02-Auth": token } inside Hub02, else {}
+  Object.assign(cfg.headers, await hub02.authHeaders()); // {} outside Hub02
   return cfg;
 });
-
-// fetch — per call, or use the wrapper:
+// fetch:
 const res = await hub02.authFetch("/api/tenants");
-// equivalently: fetch(url, { headers: { ...(await hub02.authHeaders()) } });
 ```
 
 Need the raw session/token? `await hub02.fetchAuthSession()` → `{ token, claims, ..., isValid }`,
@@ -108,6 +116,7 @@ app.get("/me", (req, res) => res.json(req.hub02User));
 | `hub02.onExpire` / `onExpire` | `(cb?) => () => void` | On 401, redirect to `login_url` (default) or run `cb`. Returns unsubscribe. |
 | `hub02.fetchAuthSession` / `fetchAuthSession` | `({forceRefresh?}) => Promise<Hub02Session>` | Mint/reuse the short-lived JWT via `/__hub02/token`; cached in memory, auto-refreshed. |
 | `hub02.token` / `token` | `() => Promise<string>` | Sugar for `(await fetchAuthSession()).token`. `""` when unauthenticated. |
+| `hub02.installFetchInterceptor` / `installFetchInterceptor` | `(opts?) => () => void` | Wrap `window.fetch` once so backend requests carry `X-Hub02-Auth`. Skips `/__hub02/*` + third parties; idempotent; returns an uninstaller. `opts.shouldAttach?(url)` overrides the target check. |
 | `hub02.authHeaders` / `authHeaders` | `() => Promise<Record<string,string>>` | `{ "X-Hub02-Auth": token }` inside Hub02, else `{}`. Spread into any request. |
 | `hub02.authFetch` / `authFetch` | `(input, init?) => Promise<Response>` | `fetch` that auto-attaches the header; preserves existing headers. |
 | `hub02.isHub02Domain` / `isHub02Domain` | `() => boolean` | Synchronous: is the app running inside Hub02 (`*.tools.hub02.com` or `window.__HUB02__`)? |

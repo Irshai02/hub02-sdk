@@ -26,8 +26,9 @@ replaces your existing auth/DB), and copy-paste ready.
 - Client → backend header: `X-Hub02-Auth: <jwt>` (SDK: `hub02.authHeaders()`).
 
 ## SDK helpers that do the heavy lifting
-**Client** (`@hub02/sdk`): `hub02.user()`, `hub02.token()`, `hub02.authHeaders()`,
-`hub02.authFetch()`, `hub02.isHub02Domain()`, `hub02.login()`.
+**Client** (`@hub02/sdk`): `hub02.installFetchInterceptor()` (one-line backend wiring),
+`hub02.user()` (email auto-filled), `hub02.token()`, `hub02.authHeaders()`, `hub02.authFetch()`,
+`hub02.isHub02Domain()`, `hub02.login()`.
 **Backend** (`@hub02/sdk/server` · `hub02-sdk`): `tryAuthenticateHub02()` /
 `try_authenticate_hub02()` (verify + fall back to native), `hub02CorsOptions()` /
 `hub02_cors_kwargs()` (CORS in one line).

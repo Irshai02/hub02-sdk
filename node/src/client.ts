@@ -68,22 +68,45 @@ async function fromMe(): Promise<Hub02MeResponse | null> {
  *
  * Tries the push-injected `window.__HUB02__` first, then falls back to the
  * same-origin `/__hub02/me` endpoint.
+ *
+ * Some gates only carry `id`/`hub_id`/`tool_id` in the launch identity and omit
+ * `email`/`name`. When that happens this lazily fills them from the signed
+ * identity token (which is enriched server-side) — so `user().email` is
+ * populated everywhere without the app doing anything. The extra token fetch
+ * only fires when the email is actually missing, and is cached.
  */
 export async function user(): Promise<Hub02User | null> {
-  const fromWin = fromWindow();
-  if (fromWin) return fromWin;
+  const base = fromWindow() ?? meToUser(await fromMe());
+  if (!base) return null;
+  if (base.email) return base;
 
-  const me = await fromMe();
-  if (me && me.authenticated && me.user_id) {
-    return {
-      id: me.user_id,
-      hub_id: me.hub_id,
-      tool_id: me.tool_id,
-      email: me.email,
-      name: me.name,
-    };
+  const claims = await claimsFromToken();
+  if (!claims) return base;
+  return {
+    ...base,
+    email: base.email ?? (claims.email as string | undefined),
+    name: base.name ?? (claims.name as string | undefined),
+  };
+}
+
+function meToUser(me: Hub02MeResponse | null): Hub02User | null {
+  if (!me || !me.authenticated || !me.user_id) return null;
+  return {
+    id: me.user_id,
+    hub_id: me.hub_id,
+    tool_id: me.tool_id,
+    email: me.email,
+    name: me.name,
+  };
+}
+
+/** Decoded claims of the current identity token (unverified — display only). */
+async function claimsFromToken(): Promise<Hub02Claims | null> {
+  try {
+    return (await fetchAuthSession()).claims;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /** True if a user identity is available. */
@@ -273,6 +296,109 @@ export async function authFetch(
   });
 }
 
+// ---- Global fetch interceptor -------------------------------------------
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  try {
+    return (input as Request).url ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Default target check: attach the identity to this app's own backend only —
+ * same-origin requests, plus Supabase Edge Functions (`*.supabase.co/functions/*`,
+ * where the builder controls CORS). Never third-party origins, and never
+ * Supabase REST/auth (adding a custom header there forces a preflight that can
+ * break RLS queries).
+ */
+function defaultShouldAttach(url: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const u = new URL(url, window.location.origin);
+    if (u.hostname.endsWith(".supabase.co")) return u.pathname.startsWith("/functions/");
+    return u.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+export interface FetchInterceptorOptions {
+  /**
+   * Decide which request URLs get the `X-Hub02-Auth` header. Defaults to this
+   * app's own backend (same-origin + Supabase Edge Functions). Return `true` to
+   * attach. Hub02's own `/__hub02/*` endpoints are ALWAYS skipped regardless.
+   */
+  shouldAttach?: (url: string) => boolean;
+}
+
+/**
+ * Wrap `window.fetch` so the Hub02 identity (`X-Hub02-Auth`) is attached to your
+ * backend requests automatically — the one line that replaces a hand-written
+ * interceptor. Additive: outside Hub02 nothing is added.
+ *
+ *   // in your app entry (main.tsx / index.tsx), once:
+ *   import { hub02 } from "@hub02/sdk";
+ *   hub02.installFetchInterceptor();
+ *
+ * It safely handles the footguns: it NEVER intercepts Hub02's own `/__hub02/*`
+ * calls (doing so recurses into token-minting → request storm → 429), and by
+ * default only attaches to your own backend, never third parties.
+ *
+ * Returns an uninstaller. Calling it more than once is a no-op (idempotent).
+ */
+export function installFetchInterceptor(
+  opts?: FetchInterceptorOptions,
+): () => void {
+  if (typeof window === "undefined" || typeof window.fetch !== "function") {
+    return () => {};
+  }
+  // Idempotent: don't double-wrap (React StrictMode / HMR / repeated calls).
+  if ((window.fetch as { __hub02__?: boolean }).__hub02__) {
+    return () => {};
+  }
+
+  const rawFetch = window.fetch;
+  const originalFetch = rawFetch.bind(window);
+  const shouldAttach = opts?.shouldAttach ?? defaultShouldAttach;
+
+  const wrapped = async (
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+  ): Promise<Response> => {
+    const url = requestUrl(input);
+    // NEVER touch Hub02's own endpoints — the SDK fetches its token there, and
+    // intercepting that call recurses into itself (request storm → CF 1015).
+    if (!url || url.includes(HUB02_ME_PATH) || url.includes(HUB02_TOKEN_PATH) || !shouldAttach(url)) {
+      return originalFetch(input as RequestInfo, init);
+    }
+    try {
+      const extra = await authHeaders();
+      if (Object.keys(extra).length > 0) {
+        const headers = new Headers(
+          init.headers || (input instanceof Request ? input.headers : undefined),
+        );
+        for (const [k, v] of Object.entries(extra)) headers.set(k, v);
+        init = { ...init, headers };
+      }
+    } catch {
+      /* proceed with the original request */
+    }
+    return originalFetch(input as RequestInfo, init);
+  };
+  (wrapped as { __hub02__?: boolean }).__hub02__ = true;
+
+  window.fetch = wrapped as typeof window.fetch;
+  return () => {
+    if (window.fetch === (wrapped as typeof window.fetch)) {
+      window.fetch = rawFetch;
+    }
+  };
+}
+
 /**
  * True when the app is running inside Hub02 (behind the Hub02 gate) — i.e. the
  * visitor arrived through Hub02 and is already signed in. Use it to decide
@@ -318,6 +444,7 @@ export const hub02 = {
   token,
   authHeaders,
   authFetch,
+  installFetchInterceptor,
   isHub02Domain,
   login,
 };
