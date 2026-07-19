@@ -341,13 +341,29 @@ describe("hub02.connectSupabase()", () => {
     expect(sb.functions.invoke).not.toHaveBeenCalled();
   });
 
-  it("reuses an existing Supabase session (no exchange)", async () => {
-    primeToken();
+  it("reuses an existing session when it belongs to the Hub02 user", async () => {
+    primeToken(); // Hub02 identity email = s@b.com
     await fetchAuthSession({ forceRefresh: true });
-    const sb = fakeSupabase({ session: { existing: true } });
+    globalThis.window.__HUB02__ = { user_id: "u-sb", email: "s@b.com" };
+    const sb = fakeSupabase({
+      session: { existing: true, user: { email: "S@B.com" } }, // case-insensitive
+    });
     const s = await connectSupabase(sb as any);
-    expect(s).toEqual({ existing: true });
+    expect(s).toMatchObject({ existing: true });
     expect(sb.functions.invoke).not.toHaveBeenCalled();
+  });
+
+  it("does NOT inherit a session belonging to a different user — re-exchanges", async () => {
+    primeToken(); // Hub02 identity email = s@b.com
+    await fetchAuthSession({ forceRefresh: true });
+    globalThis.window.__HUB02__ = { user_id: "u-sb", email: "s@b.com" };
+    const sb = fakeSupabase({
+      session: { existing: true, user: { email: "someone-else@x.com" } },
+      invokeData: { access_token: "at", refresh_token: "rt" },
+    });
+    const s = await connectSupabase(sb as any);
+    expect(sb.functions.invoke).toHaveBeenCalled(); // stale session rejected
+    expect(s).toEqual({ via: "setSession" });
   });
 
   it("exchanges via the edge function and verifies token_hash", async () => {

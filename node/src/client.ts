@@ -441,9 +441,14 @@ export async function login(): Promise<void> {
  * Minimal structural shape of a `@supabase/supabase-js` v2 client — just the
  * bits we touch. Keeps the SDK dependency-free while accepting a real client.
  */
+/** Just enough of a Supabase session to tell *whose* it is. */
+export type SupabaseSessionLike = {
+  user?: { email?: string | null } | null;
+} & Record<string, unknown>;
+
 export interface SupabaseLikeClient {
   auth: {
-    getSession(): Promise<{ data: { session: unknown | null } }>;
+    getSession(): Promise<{ data: { session: SupabaseSessionLike | null } }>;
     setSession(t: {
       access_token: string;
       refresh_token: string;
@@ -487,6 +492,23 @@ export interface ConnectSupabaseOptions {
  * Returns the Supabase session (opaque) or `null` when not inside Hub02 / on
  * failure — in which case your native login is left untouched.
  */
+/**
+ * True when an existing Supabase session belongs to the current Hub02 user.
+ *
+ * Compared by email (case-insensitive). If either side has no email we return
+ * false and re-exchange — safer to mint a correct session than to inherit an
+ * unknown one.
+ */
+async function sessionBelongsToHub02User(
+  session: SupabaseSessionLike,
+): Promise<boolean> {
+  const sessionEmail = session?.user?.email?.trim().toLowerCase();
+  if (!sessionEmail) return false;
+  const hubEmail = (await user())?.email?.trim().toLowerCase();
+  if (!hubEmail) return false;
+  return sessionEmail === hubEmail;
+}
+
 export async function connectSupabase(
   supabase: SupabaseLikeClient,
   opts?: ConnectSupabaseOptions,
@@ -498,7 +520,13 @@ export async function connectSupabase(
   if (!opts?.force) {
     try {
       const { data } = await supabase.auth.getSession();
-      if (data?.session) return data.session; // already connected
+      const existing = data?.session ?? null;
+      if (existing && (await sessionBelongsToHub02User(existing))) {
+        return existing; // already connected as the right user
+      }
+      // A session exists but belongs to someone else (e.g. a previous native
+      // login left in storage). Do NOT reuse it — fall through and re-exchange
+      // so the Hub02 visitor never inherits another user's session.
     } catch {
       /* fall through and try to exchange */
     }
