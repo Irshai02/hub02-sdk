@@ -15,7 +15,7 @@ second login**. Node + browser and Python, in one repo.
 | [`node/`](./node) | `@hub02/sdk` — client (`hub02.user()`), `./server` (verify Ed25519 tokens), `./react`. ESM + CJS + types + an IIFE browser bundle. |
 | [`python/`](./python) | `hub02-sdk` — `hub02_sdk` + `hub02_sdk.server` (framework-agnostic + FastAPI + Flask). |
 | [`examples/`](./examples) | `node-express`, `node-browser` (Base44-style), `python-fastapi`. |
-| [`docs/`](./docs) | [Integration guide](./docs/integration-guide.md), and **agentic install**: [`install/PROMPT.md`](./docs/install/PROMPT.md) (any coding agent) + [`install/SKILL.md`](./docs/install/SKILL.md). |
+| [`docs/`](./docs) | [Integration guide](./docs/integration-guide.md), and **agentic install**: [`install/PROMPT.md`](./docs/install/PROMPT.md) — routes to the client/backend/Supabase prompt for any coding agent. |
 
 ## Quick start
 

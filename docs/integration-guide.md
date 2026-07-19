@@ -170,9 +170,6 @@ Identity tokens are short-lived (≤5 min, re-minted from the live session).
 
 ## 7. Install it with your coding agent
 
-You don't have to wire this by hand. Point your agent at:
-
-- [`install/PROMPT.md`](./install/PROMPT.md) — a self-contained, copy-paste
-  prompt for any coding agent.
-- [`install/SKILL.md`](./install/SKILL.md) — an OMC / Claude-Code skill that
-  detects your stack, installs the package, and adds the guard.
+You don't have to wire this by hand. Point your agent at
+[`install/PROMPT.md`](./install/PROMPT.md) — it picks the right self-contained,
+copy-paste prompt (client / backend / Supabase) for any coding agent.

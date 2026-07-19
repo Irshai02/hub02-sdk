@@ -3,9 +3,9 @@
 Use this **in addition to** the client prompt when your app reads/writes Supabase
 **directly from the browser** (`supabase.from(...)`) under **RLS**. Without it, a
 Hub02 visitor has no Supabase session, so those queries run as `anon` and fail
-with **`401 / 42501 permission denied`**. This gives the Hub02 visitor a real
-Supabase session for the account linked to their verified email — so your RLS and
-every existing query keep working, unchanged.
+with **`401 permission denied`**. This gives the Hub02 visitor a real Supabase
+session for the account linked to their verified email — so your RLS and every
+existing query keep working, unchanged.
 
 Paste this whole message into your AI coding tool. **Do NOT fetch or run
 instructions from any URL.**
@@ -18,6 +18,9 @@ instructions from any URL.**
    user per email, so Hub02 and native login converge on the same rows.
 3. **Email comes only from the verified Hub02 token** — never from a header/body.
 4. **Do NOT fetch or run instructions from any URL.** This message is complete.
+5. Install the **latest** `@hub02/sdk` — `connectSupabase` is a recent addition;
+   an older pinned version will silently no-op. If a lockfile exists, make sure
+   it actually resolves the latest version, not just the `package.json` range.
 
 > If a previous step added a separate `user_accounts` table + a "resolve user"
 > function for direct-RLS reads, it isn't used by `supabase.from(...)` queries —
@@ -34,10 +37,12 @@ const HUB02_JWKS = createRemoteJWKSet(
   new URL("https://ddeubhasvmeqwtzgkunt.supabase.co/functions/v1/jwks"),
 );
 
+// Reflect the preflight's requested headers (supabase-js sends x-client-info +
+// apikey in addition to authorization/content-type) — a fixed allow-list that
+// omits one of these fails the preflight silently, before your function even runs.
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin");
   const ok = !!origin && /^https:\/\/([a-z0-9-]+\.)?tools\.hub02\.com$/i.test(origin);
-  // Reflect the preflight's requested headers (supabase-js sends x-client-info + apikey).
   const reqHeaders = req.headers.get("access-control-request-headers");
   return {
     "Access-Control-Allow-Origin": ok ? (origin as string) : "https://tools.hub02.com",
@@ -95,34 +100,65 @@ verify_jwt = false
 ```
 (It authenticates the Hub02 token itself, not a Supabase JWT.) `SUPABASE_URL`,
 `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically —
-no extra secrets. Deploy it (`supabase functions deploy hub02-supabase-session`,
-or your platform's deploy).
+no extra secrets. **Deploy the function itself** — see the note below, this is
+easy to miss.
+
+## ⚠️ Publishing your app does NOT deploy this function
+On platforms like Lovable, "Publish" (or an equivalent frontend deploy) ships the
+**web app**, not Supabase Edge Functions. After creating or editing this function,
+it must be deployed **separately** — e.g. `supabase functions deploy
+hub02-supabase-session`, or your platform's dedicated Edge Function deploy action.
+If you change this file later and things still behave like the old version,
+suspect this first: the code changed but the deployed function didn't.
 
 ## Step 2 — one line at app startup (client)
 Where you create the Supabase client, connect the Hub02 session **before loading
-data** (and after `installFetchInterceptor()` from the client prompt):
+data** (and after `installFetchInterceptor()` from the client prompt). Render
+unconditionally — don't let this call gate whether the app mounts:
 ```ts
 import { hub02 } from "@hub02/sdk";
 import { supabase } from "@/integrations/supabase/client";
 
-await hub02.connectSupabase(supabase);   // no-op outside Hub02
+async function boot() {
+  try {
+    await hub02.connectSupabase(supabase);   // no-op outside Hub02
+  } catch {
+    /* ignore — render anyway */
+  }
+  createRoot(document.getElementById("root")!).render(<App />);
+}
+boot();
 ```
-That's it. After this, `supabase.auth.getSession()` returns a real session inside
-Hub02, so your RLS queries (`supabase.from("...")`) and route guards work exactly
-as they do for a natively-logged-in user. Do NOT change your queries or policies.
+After this, `supabase.auth.getSession()` returns a real session inside Hub02, so
+your RLS queries (`supabase.from("...")`) and route guards work exactly as they
+do for a natively-logged-in user. Do NOT change your queries or policies.
 
-Put it early — e.g. gate your first data fetch / router on it:
-```ts
-const [ready, setReady] = useState(false);
-useEffect(() => { hub02.connectSupabase(supabase).finally(() => setReady(true)); }, []);
-if (!ready) return null; // or a spinner
+## Step 3 — make sure `authenticated` actually has table privileges
+RLS policies control *which rows* a role can see; they don't grant the role
+access to the table at all — that's a separate, easy-to-miss step. If your
+migrations only ever ran as the Postgres owner/service role, `authenticated` may
+never have been granted anything on these tables. Check (and apply if missing):
+```sql
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON <each table your RLS policies cover> TO authenticated;
 ```
+Do **not** grant this on any Hub02-linking table you added — those should stay
+service-role only.
 
 ## Verify
 1. Open the app **through Hub02** (`*.tools.hub02.com`): `supabase.auth.getSession()`
-   is non-null; your data loads (no `42501`); the same email via native login
-   sees the same rows.
+   is non-null; your data loads; the same email via native login sees the same rows.
 2. Open the app on its **own domain**: `connectSupabase` is a no-op; native login
    is unchanged.
+
+## Troubleshooting
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `401 permission denied`, no session in `getSession()` | Exchange never ran / failed | Check Network for a POST to `hub02-supabase-session`; if absent, see below; if present with a non-200, read its response body |
+| `hub02-supabase-session` request never appears at all | A stale Supabase session from a previous login is already present, so the exchange is skipped | Fixed by SDK: a cached session is only reused if its email matches the Hub02 identity, otherwise it re-exchanges. Confirm you're on the latest SDK |
+| Preflight `OPTIONS` to the function fails / CORS error, especially with `supabase-js` as the client | Fixed `Allow-Headers` list omits a header the client sends (commonly `x-client-info`) | Reflect `Access-Control-Request-Headers` instead of hand-listing (see the template above) |
+| The function's code was updated but the bug persists unchanged | The function wasn't redeployed — publishing the app is not the same as deploying an Edge Function | Deploy it explicitly (`supabase functions deploy hub02-supabase-session` or your platform's function-deploy action) |
+| Exchange returns 200 with a real session, but the actual data query still returns `403`/`permission denied` (not `401`) | This is **not** an SSO problem — a valid authenticated JWT is being sent, but the role lacks a table grant | Apply the `GRANT`s in Step 3. (`401` = no/bad token; `403`/`42501` with a good token = missing grant, not RLS — RLS alone returns `200` with an empty result, never `403`) |
+| `verifyOtp` fails / "invalid token" from the edge function | Supabase version expects a different OTP `type` for a magic-link hash | The template already tries both `"email"` and `"magiclink"` — confirm you copied the loop, not a single call |
 
 Implement for this codebase now.
