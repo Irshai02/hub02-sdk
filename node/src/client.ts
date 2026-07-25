@@ -21,6 +21,17 @@ import {
   type Hub02TokenResponse,
   type Hub02Claims,
 } from "./shared";
+import {
+  autoSSO,
+  buildAuthorizeUrl,
+  defaultOidcRedirectUri,
+  hasHub02LaunchContext,
+  startSSO,
+  HUB02_OIDC_CALLBACK_PATH,
+  HUB02_OIDC_ISSUER_DEFAULT,
+  type StartSSOOptions,
+  type AutoSSOOptions,
+} from "./oidc-client";
 
 export type {
   Hub02User,
@@ -28,6 +39,17 @@ export type {
   Hub02Session,
   Hub02Claims,
 } from "./shared";
+
+export type { StartSSOOptions, AutoSSOOptions } from "./oidc-client";
+export {
+  startSSO,
+  autoSSO,
+  buildAuthorizeUrl,
+  hasHub02LaunchContext,
+  defaultOidcRedirectUri,
+  HUB02_OIDC_CALLBACK_PATH,
+  HUB02_OIDC_ISSUER_DEFAULT,
+} from "./oidc-client";
 
 function fromWindow(): Hub02User | null {
   if (typeof window === "undefined") return null;
@@ -576,6 +598,11 @@ export const hub02 = {
   connectSupabase,
   isHub02Domain,
   login,
+  startSSO,
+  autoSSO,
+  buildAuthorizeUrl,
+  hasHub02LaunchContext,
+  defaultOidcRedirectUri,
 };
 
 export default hub02;

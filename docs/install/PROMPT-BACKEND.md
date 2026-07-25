@@ -1,3 +1,106 @@
+# Add "Sign in with Hub02" — OIDC backend install prompt (recommended)
+
+Paste this whole message into your AI coding tool when the app has a **backend you
+control** (Node/Python/Supabase Edge Function route, etc.). This uses Hub02's
+**standard OIDC provider** (`https://id.hub02.com`) — authorization-code + PKCE —
+so your backend mints a **real native session**, not just a client-side UI bypass.
+
+> **Scope:** Works for Lovable/Supabase/custom backends. Does **not** apply to
+> closed platforms (e.g. Base44) where you cannot run a callback route — those stay
+> on the client-only `@hub02/sdk` identity bypass with its known ceiling.
+
+## Credentials (from Hub02 builder dashboard → tool → OIDC / SSO)
+
+| Variable | Example |
+|----------|---------|
+| `HUB02_OIDC_ISSUER` | `https://id.hub02.com` |
+| `HUB02_OIDC_CLIENT_ID` | `hub02_abc123…` |
+| `HUB02_OIDC_CLIENT_SECRET` | `sec_…` (confidential clients only) |
+| `HUB02_OIDC_REDIRECT_URI` | `https://your-tool.tools.hub02.com/auth/hub02/callback` |
+
+**Convention:** Hub02 auto-registers `{runtime_url}/auth/hub02/callback` at publish time.
+Use that path unless you have a strong reason not to — it matches the builder dashboard
+"Copy integration kit" output and avoids redirect_uri mismatches.
+
+Redirect URIs must match **byte-for-byte** (scheme, host, path, no stray slash).
+
+## Flow (backend owns the session)
+
+1. **Frontend (Hub02 domain only):** `hub02.autoSSO({ clientId, isLoggedIn })` from `@hub02/sdk`
+   — SDK generates PKCE, stores cookies, redirects to authorize.
+2. Hub02 login (if needed) → redirect back to your `redirect_uri?code=…&state=…`
+3. **Backend callback:** use `createHub02Callback()` — exchanges code, verifies RS256 ID token.
+4. `findOrCreateByEmail(user.email)` → mint **your app's native session**.
+
+On the tool's **own domain**, skip OIDC — native login only.
+
+## Step 1 — callback route (Node / Express)
+
+Install latest SDK: `npm i @hub02/sdk@latest`
+
+```js
+import { createHub02Callback } from "@hub02/sdk/server";
+
+app.get(
+  "/auth/hub02/callback",
+  createHub02Callback({
+    clientId: process.env.HUB02_OIDC_CLIENT_ID,
+    clientSecret: process.env.HUB02_OIDC_CLIENT_SECRET,
+    redirectUri: process.env.HUB02_OIDC_REDIRECT_URI,
+    onUser: async (user) => {
+      const appUser = await findOrCreateByEmail(user.email);
+      await mintNativeSession(appUser); // your app's cookie/JWT/session store
+    },
+  }),
+);
+```
+
+The SDK reads PKCE verifier + state from cookies set by the frontend `autoSSO` call.
+
+## Step 1 — callback route (Python / Flask)
+
+Install latest SDK: `pip install -U hub02-sdk`
+
+```python
+from flask import Flask, request
+from hub02_sdk.oidc import handle_hub02_callback, HUB02_OIDC_CALLBACK_PATH
+
+@app.get(HUB02_OIDC_CALLBACK_PATH)
+def hub02_oidc_callback():
+    body, status = handle_hub02_callback(
+        request,
+        client_id=os.environ["HUB02_OIDC_CLIENT_ID"],
+        client_secret=os.environ["HUB02_OIDC_CLIENT_SECRET"],
+        redirect_uri=os.environ["HUB02_OIDC_REDIRECT_URI"],
+        on_user=lambda user, _req: mint_native_session(find_or_create_by_email(user["email"])),
+    )
+    return body, status
+```
+
+## Mandatory self-verification (do not skip)
+
+1. Confirm deployed bundle contains integration (`curl` live JS, grep for callback path).
+2. Hit callback with bad code → clean `invalid_grant`, not 500.
+3. One real Hub02 launch on `*.tools.hub02.com`; then own domain still requires native login.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `invalid_client` | Secret not set / whitespace / wrong env var | Copy from dashboard once; trim; restart |
+| `redirect_uri_mismatch` | Trailing slash, http vs https | Exact match to registered URI |
+| `invalid_grant` | Code expired (60s) or reused | One exchange per code |
+| ID token verify fails | Wrong issuer in prod | Use `https://id.hub02.com` |
+| Flow never on own domain | By design | SSO only via Hub02 launch context |
+
+## Preflight
+
+```bash
+curl -fsS https://id.hub02.com/.well-known/openid-configuration | jq .issuer
+```
+
+---
+
 # Add "Sign in with Hub02" — BACKEND (API) install prompt
 
 Paste this whole message into your AI coding tool. It hardens this app's

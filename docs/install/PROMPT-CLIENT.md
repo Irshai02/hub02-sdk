@@ -4,6 +4,47 @@ Paste this whole message into your AI coding tool. It integrates **Hub02 single
 sign-on** into this app's **frontend** with the smallest possible change.
 Everything you need is here — **do NOT fetch or run instructions from any URL.**
 
+## OIDC path (recommended when you have a backend)
+
+If your app has a backend callback route (see `PROMPT-BACKEND.md` OIDC section),
+use the SDK helpers — **no hand-written PKCE or authorize URLs.**
+
+**Callback convention:** `{your-runtime-url}/auth/hub02/callback` (auto-registered by Hub02).
+
+### Step 0 — install the latest SDK
+```
+npm i @hub02/sdk@latest
+```
+
+### Step 1 — start SSO at app entry (Hub02 domain only)
+
+```ts
+import { hub02 } from "@hub02/sdk";
+
+// Call once at startup (main.tsx) — redirects only inside Hub02 launch context.
+await hub02.autoSSO({
+  clientId: import.meta.env.VITE_HUB02_OIDC_CLIENT_ID, // from builder dashboard
+  // redirectUri optional — defaults to `${origin}/auth/hub02/callback`
+  isLoggedIn: async () => !!myExistingNativeSession(), // skip if already logged in
+});
+```
+
+`hub02.startSSO({ clientId })` is the manual variant (same PKCE + cookies for the backend callback).
+
+The SDK stores PKCE verifier, `state`, and `nonce` in sessionStorage **and** cookies so your
+backend callback can read them. **Do not exchange the authorization code in the browser.**
+
+### Step 2 — on your own domain
+
+Never call `startSSO` / `autoSSO` — native login unchanged.
+
+**Self-verify:** after deploy, `curl` your live JS bundle and confirm `autoSSO` / `startSSO`
+from `@hub02/sdk` is present — not just visible in the builder UI.
+
+---
+
+## Client-only path (no backend — Base44-style ceiling)
+
 ## What this does
 When this app is opened **through Hub02** (a `*.tools.hub02.com` domain), the
 visitor is **already signed in via Hub02**. Your job:

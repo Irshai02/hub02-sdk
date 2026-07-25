@@ -85,3 +85,51 @@ export function mockJwks(...keys: TestKeys[]) {
     return key;
   };
 }
+
+export interface Rs256TestKeys {
+  privateKey: KeyLike;
+  publicKey: KeyLike;
+  publicJwk: JWK;
+  kid: string;
+}
+
+export async function makeRs256Keys(kid = "oidc-test-key"): Promise<Rs256TestKeys> {
+  const { privateKey, publicKey } = await generateKeyPair("RS256", {
+    extractable: true,
+  });
+  const publicJwk = await exportJWK(publicKey);
+  publicJwk.kid = kid;
+  publicJwk.alg = "RS256";
+  publicJwk.use = "sig";
+  return { privateKey, publicKey, publicJwk, kid };
+}
+
+export interface MintOidcOptions {
+  sub?: string;
+  email?: string;
+  name?: string;
+  hub02_tool_id?: string;
+  nonce?: string;
+  iss?: string;
+  aud?: string;
+  expiresIn?: string;
+}
+
+export async function mintOidcIdToken(
+  keys: Rs256TestKeys,
+  opts: MintOidcOptions = {},
+): Promise<string> {
+  return new SignJWT({
+    email: opts.email ?? "user@example.com",
+    name: opts.name ?? "Test User",
+    hub02_tool_id: opts.hub02_tool_id,
+    nonce: opts.nonce,
+  })
+    .setProtectedHeader({ alg: "RS256", kid: keys.kid })
+    .setSubject(opts.sub ?? "11111111-1111-1111-1111-111111111111")
+    .setIssuer(opts.iss ?? "https://id.hub02.com")
+    .setAudience(opts.aud ?? "hub02_test_client")
+    .setIssuedAt()
+    .setExpirationTime(opts.expiresIn ?? "5m")
+    .sign(keys.privateKey);
+}

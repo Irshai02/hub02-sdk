@@ -19,6 +19,15 @@ from ._shared import (
     Hub02User,
 )
 from .client import user_from_me_response, user_from_window_identity
+from .oidc import (
+    HUB02_OIDC_CALLBACK_PATH,
+    HUB02_OIDC_ISSUER_DEFAULT,
+    Hub02OidcError,
+    exchange_hub02_code,
+    generate_pkce,
+    handle_hub02_callback,
+    verify_hub02_id_token,
+)
 
 __all__ = [
     "Hub02User",
@@ -31,6 +40,13 @@ __all__ = [
     "HUB02_ME_PATH",
     "user_from_window_identity",
     "user_from_me_response",
+    "HUB02_OIDC_ISSUER_DEFAULT",
+    "HUB02_OIDC_CALLBACK_PATH",
+    "Hub02OidcError",
+    "exchange_hub02_code",
+    "verify_hub02_id_token",
+    "handle_hub02_callback",
+    "generate_pkce",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

@@ -18,14 +18,13 @@ needed, and don't paste more than the two you need.
   path goes through a request handler where a header can be checked →
   **[`PROMPT-BACKEND.md`](./PROMPT-BACKEND.md)**.
 - **Direct database access under row-level security** — the client calls
-  `supabase.from(...)` (or an equivalent BaaS SDK) straight from the browser;
-  there is no server-side handler to check a header in, because Postgres/the
-  BaaS itself enforces authorization via the caller's session →
-  **[`PROMPT-SUPABASE.md`](./PROMPT-SUPABASE.md)**.
-  (This is the Supabase implementation of a general pattern — bridging identity
-  into a database that authorizes by session, not by a header. If a future tool
-  uses a different BaaS with the same direct-to-DB model, the same idea
-  applies: mint that BaaS's own session from the verified Hub02 identity.)
+  `supabase.from(...)` from the browser → pick **one**:
+  - **OIDC / real Supabase sessions (recommended):**
+    **[`PROMPT-SUPABASE-OIDC.md`](./PROMPT-SUPABASE-OIDC.md)** — enable Keycloak
+    provider in Supabase Auth, paste 3 values, call `signInWithOAuth`.
+  - **Legacy launch-token bridge:**
+    **[`PROMPT-SUPABASE.md`](./PROMPT-SUPABASE.md)** — `hub02.connectSupabase()` +
+    `hub02-supabase-session` edge function (header-injection path).
 - **Not sure?** If `grep -r "supabase.from(" src/` (or `.from<Table>`) turns up
   your data reads, it's the Supabase case, even if the project also has a few
   Edge Functions. If all data access goes through your own API endpoints, it's
@@ -52,11 +51,12 @@ breaks by doing it in either order.
 Always install the **latest** `@hub02/sdk` / `hub02-sdk` — older versions are
 missing helpers these prompts assume exist (see each prompt's Step 1).
 
-**Client** (`@hub02/sdk`): `hub02.installFetchInterceptor()` (one-line backend
-wiring), `hub02.connectSupabase(supabase)` (one-line Supabase-RLS session),
-`hub02.user()` (email auto-filled), `hub02.token()`, `hub02.authHeaders()`,
-`hub02.authFetch()`, `hub02.isHub02Domain()`, `hub02.login()`.
+**Client** (`@hub02/sdk`): `hub02.autoSSO()` / `hub02.startSSO()` (OIDC redirect),
+`hub02.installFetchInterceptor()` (legacy header path), `hub02.connectSupabase()`
+(legacy Supabase bridge), `hub02.user()`, `hub02.isHub02Domain()`.
 
-**Backend** (`@hub02/sdk/server` · `hub02-sdk`): `tryAuthenticateHub02()` /
-`try_authenticate_hub02()` (verify + fall back to native), `hub02CorsOptions()`
-/ `hub02_cors_kwargs()` (CORS in one line).
+**Backend** (`@hub02/sdk/server`): `createHub02Callback()` (OIDC callback),
+`tryAuthenticateHub02()` (legacy header verify), `hub02CorsOptions()`.
+
+**Supabase Auth (no SDK protocol code):** Keycloak provider URL
+`https://id.hub02.com/realms/hub02` — see `PROMPT-SUPABASE-OIDC.md`.

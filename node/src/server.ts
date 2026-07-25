@@ -39,6 +39,35 @@ export {
   type Hub02User,
 } from "./shared";
 
+export {
+  createHub02Callback,
+  exchangeHub02Code,
+  handleHub02Callback,
+  verifyHub02IdToken,
+  Hub02OidcError,
+  HUB02_OIDC_CALLBACK_PATH,
+  HUB02_OIDC_ISSUER_DEFAULT,
+  type Hub02OidcUser,
+  type Hub02OidcTokenResponse,
+  type CreateHub02CallbackOptions,
+  type ExchangeHub02CodeOptions,
+  type VerifyHub02IdTokenOptions,
+} from "./oidc-server";
+import {
+  createHub02Callback,
+  exchangeHub02Code,
+  handleHub02Callback,
+  verifyHub02IdToken,
+  Hub02OidcError,
+  HUB02_OIDC_CALLBACK_PATH,
+  HUB02_OIDC_ISSUER_DEFAULT,
+  type Hub02OidcUser,
+  type Hub02OidcTokenResponse,
+  type CreateHub02CallbackOptions,
+  type ExchangeHub02CodeOptions,
+  type VerifyHub02IdTokenOptions,
+} from "./oidc-server";
+
 export interface VerifyOptions {
   /** Override the JWKS endpoint (tests). */
   jwksUrl?: string;
